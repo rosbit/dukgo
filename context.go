@@ -43,7 +43,7 @@ func NewContext() (*JsContext, error) {
 }
 
 func freeJsContext(ctx *JsContext) {
-	fmt.Printf("context freed\n")
+	// fmt.Printf("context freed\n")
 	c := ctx.c
 	C.duk_destroy_heap(c)
 }
@@ -89,13 +89,14 @@ func (ctx *JsContext) eval(script *C.char, scriptLen C.int, env map[string]inter
 	return fromJsValue(c)
 }
 
+/*
 func dump(ctx *C.duk_context, prompt string) {
 	fmt.Printf("--- %s BEGIN ---\n", prompt)
 	C.duk_push_context_dump(ctx)
 	fmt.Printf("%s\n", C.GoString(C.getCString(ctx, -1)))
 	C.duk_pop(ctx)
 	fmt.Printf("--- %s END ---\n", prompt)
-}
+}*/
 
 func setEnv(ctx *C.duk_context, env map[string]interface{}) {
 	C.duk_push_global_object(ctx) // [ global ]
