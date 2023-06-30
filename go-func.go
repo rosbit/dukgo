@@ -58,7 +58,6 @@ func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 		return nil
 	}
 	v, e := helper.CallGolangFunc(argc, "djs-func", getArgs) // call Golang function
-	C.duk_pop_n(ctx, C.int(argc)) // [ ]  pop all duktape args
 
 	// convert result (in var v) of Golang function to that of JS.
 	// 1. error
@@ -73,13 +72,13 @@ func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 
 	// 3. array or scalar
 	if vv, ok := v.([]interface{}); ok {
-		C.duk_push_array(ctx) // [ arr ]
+		C.duk_push_array(ctx) // [ args ... arr ]
 		for i, rv := range vv {
-			pushJsValue(ctx, rv) // [ arr rv ]
-			C.duk_put_prop_index(ctx, -2, C.duk_uarridx_t(i)) // [ arr ] arr with i-th value rv
+			pushJsValue(ctx, rv) // [ args ... arr rv ]
+			C.duk_put_prop_index(ctx, -2, C.duk_uarridx_t(i)) // [ args ... arr ] arr with i-th value rv
 		}
 	} else {
-		pushJsValue(ctx, v) // [ v ]
+		pushJsValue(ctx, v) // [ args ... v ]
 	}
 	return 1
 }

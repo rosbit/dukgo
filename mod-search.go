@@ -23,21 +23,19 @@ func modSearch(ctx *C.duk_context) C.duk_ret_t {
 	if !strings.HasSuffix(modPath, ".js") {
 		modPath = fmt.Sprintf("%s.js", modPath)
 	}
-	C.duk_pop_n(ctx, 4)
 
 	absModPath := toAbsPath(exePath, modPath)
 	b, err := os.ReadFile(absModPath)
 	if err != nil {
-		C.duk_push_undefined(ctx);
-		return 1;
+		return 0
 	}
 
-	var src *C.char;
-	var size C.int;
+	var src *C.char
+	var size C.int
 	getBytesPtrLen(b, &src, &size)
 
 	C.duk_push_lstring(ctx, src, C.size_t(size))
-	return 1;
+	return 1
 }
 
 func setObjFunction(ctx *C.duk_context, funcName string, fn C.duk_c_function, nargs int) {
