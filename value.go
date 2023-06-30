@@ -1,12 +1,12 @@
 package djs
 
 // #include "duktape.h"
+// static const char *getCString(duk_context *ctx, duk_idx_t idx);
 import "C"
 import (
 	"reflect"
 	"fmt"
 	"strings"
-	"encoding/json"
 )
 
 func pushJsValue(ctx *C.duk_context, v interface{}) {
@@ -113,22 +113,62 @@ func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
 			return
 		}
 
-		// if uint32(C.duk_is_array(ctx, -1)) != 0 {
+		if C.duk_is_array(ctx, -1) != 0 {
 			// array
-		// } else {
+			return fromJsArr(ctx)
+		} else {
 			// object
-		// }
-		C.duk_json_encode(ctx, -1)
-		s := C.duk_get_lstring(ctx, -1, &length)
-		b := toBytes(s, int(length))
-		err = json.Unmarshal(b, &goVal)
-		return
+			return fromJsObj(ctx)
+		}
 	// case C.DUK_TYPE_POINTER:
 	// case C.DUK_TYPE_LIGHTFUNC:
 	default:
 		err = fmt.Errorf("unsupporting type")
 		return
 	}
+}
+
+func fromJsArr(ctx *C.duk_context) (goVal interface{}, err error) {
+	// [ ... arr ]
+	l := C.duk_get_length(ctx, -1)
+	if l == 0 {
+		goVal = []interface{}{}
+		return
+	}
+
+	length := int(l)
+	res := make([]interface{}, length)
+	for i:=0; i<length; i++ {
+		C.duk_get_prop_index(ctx, -1, C.duk_uarridx_t(i)) // [ ... arr i-th-value ]
+		if res[i], err = fromJsValue(ctx); err != nil {
+			C.duk_pop(ctx) // [ ... arr ]
+			return
+		}
+		C.duk_pop(ctx) // [ ... arr ]
+	}
+	goVal = res
+	return
+}
+
+func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
+	// [ ... obj ]
+	C.duk_enum(ctx, -1, 0) // [ ... obj enum ]
+	res := make(map[string]interface{})
+	for C.duk_next(ctx, -1, 1) != 0 {
+		// [ ... obj enum key value ]
+		key := C.GoString(C.getCString(ctx, -2))
+		val, e := fromJsValue(ctx)
+		if e != nil {
+			err = e
+			C.duk_pop_n(ctx, 3) // [ ... obj ]
+			return
+		}
+		res[key] = val
+		C.duk_pop_n(ctx, 2) // [ ... obj enum ]
+	}
+	C.duk_pop(ctx) // [ ... obj ]
+	goVal = res
+	return
 }
 
 func pushString(ctx *C.duk_context, s string) {
