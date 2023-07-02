@@ -71,15 +71,7 @@ func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 	}
 
 	// 3. array or scalar
-	if vv, ok := v.([]interface{}); ok {
-		C.duk_push_array(ctx) // [ args ... arr ]
-		for i, rv := range vv {
-			pushJsValue(ctx, rv) // [ args ... arr rv ]
-			C.duk_put_prop_index(ctx, -2, C.duk_uarridx_t(i)) // [ args ... arr ] arr with i-th value rv
-		}
-	} else {
-		pushJsValue(ctx, v) // [ args ... v ]
-	}
+	pushJsValue(ctx, v) // [ args ... v ]
 	return 1
 }
 
