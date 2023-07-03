@@ -234,6 +234,10 @@ func pushStruct(ctx *C.duk_context, structVar reflect.Value) {
 		name := structT.Field(i).Name
 		fv := structE.FieldByName(name)
 
+		if !fv.CanInterface() {
+			continue
+		}
+
 		lName := lowerFirst(name)
 		pushJsValue(ctx, lName)          // [ obj lName ]
 		pushJsValue(ctx, fv.Interface()) // [ obj lName fv ]
