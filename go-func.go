@@ -2,18 +2,18 @@ package djs
 
 /*
 #include "duktape.h"
+static const char *getCString(duk_context *ctx, duk_idx_t idx);
 extern duk_ret_t goFuncBridge(duk_context *ctx);
 */
 import "C"
 import (
 	elutils "github.com/rosbit/go-embedding-utils"
 	"reflect"
-	"unsafe"
 	"fmt"
 )
 
 var (
-	NATIVE_FUNC string = "\xFF_nf_"
+	FUNC_NAME string = "\xFF_fn_"
 )
 
 func pushGoFunc(ctx *C.duk_context, funcVar interface{}) (err error) {
@@ -27,22 +27,47 @@ func pushGoFunc(ctx *C.duk_context, funcVar interface{}) (err error) {
 	return
 }
 
+func getGoFuncValue(ctx *C.duk_context, funcName string) (funcPtr interface{}, err error) {
+	jsCtx, e := getContext(ctx)
+	if e != nil {
+		err = e
+		return
+	}
+	if len(jsCtx.env) == 0 {
+		err = fmt.Errorf("no env found")
+		return
+	}
+	fn, ok := jsCtx.env[funcName]
+	if !ok {
+		err = fmt.Errorf("func name %s not found", funcName)
+		return
+	}
+	funcPtr = fn
+	return
+}
+
 //export goFuncBridge
 func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 	var cNativeFunc *C.char
 	var cNativeFuncLen C.int
-	getStrPtrLen(&NATIVE_FUNC, &cNativeFunc, &cNativeFuncLen)
+	getStrPtrLen(&FUNC_NAME, &cNativeFunc, &cNativeFuncLen)
 
 	// get pointer of Golang function attached to goFuncBridge
 	// [ arg1 arg2 ... argN ]
 	argc := int(C.duk_get_top(ctx))
 	C.duk_push_current_function(ctx); // [ args ... goFuncBridge ]
 	C.duk_get_prop_lstring(ctx, -1, cNativeFunc, C.size_t(cNativeFuncLen)) // [ args ... goFuncBridge goFnPtr ]
-	ptr := C.duk_get_pointer(ctx, -1)
-	fn := *((*interface{})(ptr))
+	name := C.GoString(C.getCString(ctx, -1))
 	C.duk_pop_n(ctx, 2) // [ args ... ]
 
+	fn, err := getGoFuncValue(ctx, name)
+	if err != nil {
+		return C.DUK_RET_ERROR
+	}
 	fnVal := reflect.ValueOf(fn)
+	if fnVal.Kind() != reflect.Func {
+		return C.DUK_RET_ERROR
+	}
 	fnType := fnVal.Type()
 
 	// make args for Golang function
@@ -76,8 +101,6 @@ func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 }
 
 func pushWrappedGoFunc(ctx *C.duk_context, fnVar interface{}, fnType reflect.Type) {
-	fnVarPtr := &fnVar
-
 	// args count
 	argc := fnType.NumIn()
 	nargs := C.int(C.DUK_VARARGS)
@@ -87,11 +110,12 @@ func pushWrappedGoFunc(ctx *C.duk_context, fnVar interface{}, fnType reflect.Typ
 
 	var cNativeFunc *C.char
 	var cNativeFuncLen C.int
-	getStrPtrLen(&NATIVE_FUNC, &cNativeFunc, &cNativeFuncLen)
+	getStrPtrLen(&FUNC_NAME, &cNativeFunc, &cNativeFuncLen)
 
-	// [ ... ]
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.goFuncBridge), nargs) // [ ... goFuncBridge ]
-	C.duk_push_pointer(ctx, unsafe.Pointer(fnVarPtr)) // [ ... goFuncBridge fnVarPtr ]
-	C.duk_put_prop_lstring(ctx, -2, cNativeFunc, C.size_t(cNativeFuncLen)) // [ ... goFuncBridge ] with goFuncBridge[_nf_] = fnVarPtr
+	// [ ... funcName ]
+	C.duk_push_c_function(ctx, (C.duk_c_function)(C.goFuncBridge), nargs) // [ ... funcName goFuncBridge ]
+	C.duk_push_null(ctx) // [ ... funcName goFuncBridge null ]
+	C.duk_copy(ctx, -3, -1) // [ ... funcName goFuncBridge funcName ]
+	C.duk_put_prop_lstring(ctx, -2, cNativeFunc, C.size_t(cNativeFuncLen)) // [ ... funcName goFuncBridge ] with goFuncBridge[_fn_] = funcName
 }
 

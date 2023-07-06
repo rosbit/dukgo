@@ -5,6 +5,7 @@ package djs
 import "C"
 import (
 	"reflect"
+	"unsafe"
 	"fmt"
 	"strings"
 )
@@ -120,7 +121,9 @@ func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
 			// object
 			return fromJsObj(ctx)
 		}
-	// case C.DUK_TYPE_POINTER:
+	case C.DUK_TYPE_POINTER:
+		goVal = unsafe.Pointer(C.duk_get_pointer(ctx, -1))
+		return
 	// case C.DUK_TYPE_LIGHTFUNC:
 	default:
 		err = fmt.Errorf("unsupporting type")
