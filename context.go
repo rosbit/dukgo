@@ -27,7 +27,6 @@ import (
 
 type JsContext struct {
 	c *C.duk_context
-	env map[string]interface{}
 }
 
 func NewContext() (*JsContext, error) {
@@ -39,50 +38,14 @@ func NewContext() (*JsContext, error) {
 	c := &JsContext {
 		c: ctx,
 	}
-	bindContext(c)
 	runtime.SetFinalizer(c, freeJsContext)
 	return c, nil
 }
 
-var _env = "go-duktape"
-func bindContext(ctx *JsContext) {
-	var cstr *C.char
-	var length C.int
-	getStrPtrLen(&_env, &cstr, &length)
-
-	c := ctx.c
-	C.duk_push_global_stash(c) // [ stash ]
-	C.duk_push_pointer(c, unsafe.Pointer(ctx)) // [ stash ctx ]
-	C.duk_put_prop_lstring(c, -2, cstr, C.size_t(length)) // [ stash ] with stash[_env] = ctx
-	C.duk_pop(c) // [ ]
-}
-
-func getContext(c *C.duk_context) (*JsContext, error) {
-	var cstr *C.char
-	var length C.int
-	getStrPtrLen(&_env, &cstr, &length)
-
-	C.duk_push_global_stash(c) // [ stash ]
-	C.duk_get_prop_lstring(c, -1, cstr, C.size_t(length)) // [ stash result ]
-	res, err := fromJsValue(c)
-	defer C.duk_pop_n(c, 2) // [ ]
-
-	if err != nil {
-		return nil, err
-	}
-	if res == nil {
-		return nil, fmt.Errorf("no context")
-	}
-	if ctx, ok := res.(unsafe.Pointer); ok {
-		return (*JsContext)(ctx), nil
-	}
-	return nil, fmt.Errorf("unknown type")
-}
-
 func freeJsContext(ctx *JsContext) {
 	// fmt.Printf("context freed\n")
-	ctx.env = nil
 	c := ctx.c
+	ptrs.delPtrStore((uintptr(unsafe.Pointer(c))))
 	C.duk_destroy_heap(c)
 }
 
@@ -114,7 +77,6 @@ func (ctx *JsContext) EvalFile(scriptFile string, env map[string]interface{}) (r
 }
 
 func (ctx *JsContext) eval(script *C.char, scriptLen C.int, env map[string]interface{}) (res interface{}, err error) {
-	ctx.env = env
 	c := ctx.c
 	setEnv(c, env)
 
@@ -223,10 +185,10 @@ func (ctx *JsContext) BindFunc(funcName string, funcVarPtr interface{}) (err err
 }
 
 func (ctx *JsContext) BindFuncs(funcName2FuncVarPtr map[string]interface{}) (err error) {
-    for funcName, funcVarPtr := range funcName2FuncVarPtr {
-        if err = ctx.BindFunc(funcName, funcVarPtr); err != nil {
-            return
-        }
-    }
-    return
+	for funcName, funcVarPtr := range funcName2FuncVarPtr {
+		if err = ctx.BindFunc(funcName, funcVarPtr); err != nil {
+			return
+		}
+	}
+	return
 }

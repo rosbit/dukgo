@@ -223,14 +223,13 @@ func pushStruct(ctx *C.duk_context, structVar reflect.Value) {
 	}
 	structT := structE.Type()
 
-	/*
 	if structE == structVar {
 		// struct is unaddressable, so make a copy of struct to an Elem of struct-pointer.
 		// NOTE: changes of the copied struct cannot effect the original one. it is recommended to use the pointer of struct.
 		structVar = reflect.New(structT) // make a struct pointer
 		structVar.Elem().Set(structE)    // copy the old struct
 		structE = structVar.Elem()       // structE is the copied struct
-	}*/
+	}
 
 	obj_idx := C.duk_push_object(ctx) // [ obj ]
 	for i:=0; i<structT.NumField(); i++ {
@@ -242,9 +241,27 @@ func pushStruct(ctx *C.duk_context, structVar reflect.Value) {
 		}
 
 		lName := lowerFirst(name)
-		pushJsValue(ctx, lName)          // [ obj lName ]
+		pushString(ctx, lName)          // [ obj lName ]
 		pushJsValue(ctx, fv.Interface()) // [ obj lName fv ]
 		C.duk_put_prop(ctx, obj_idx) // [ obj ] with obj[lName] = fv
+	}
+
+	pushStructMethods(ctx, structE, structT)
+	t := structVar.Type()
+	pushStructMethods(ctx, structVar, t)
+}
+
+func pushStructMethods(ctx *C.duk_context, structE reflect.Value, structT reflect.Type) {
+	for i:=0; i<structE.NumMethod(); i++ {
+		name := structT.Method(i).Name
+		fv := structE.Method(i)
+		if !fv.CanInterface() {
+			continue
+		}
+		lName := lowerFirst(name)
+		pushString(ctx, lName)          // [ obj lName ]
+		pushGoFunc(ctx, fv.Interface()) // [ obj lName fv ]
+		C.duk_put_prop(ctx, -3)    // [ obj ] with obj[lName] = fv
 	}
 }
 
