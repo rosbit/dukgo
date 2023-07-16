@@ -9,26 +9,15 @@ import (
 	elutils "github.com/rosbit/go-embedding-utils"
 	"reflect"
 	"unsafe"
-	"fmt"
 )
 
 var (
 	FUNC_NAME string = "\xFF_fn_\x00"
 )
 
-func pushGoFunc(ctx *C.duk_context, funcVar interface{}) (err error) {
+func pushGoFunc(ctx *C.duk_context, funcVar interface{}) {
 	t := reflect.TypeOf(funcVar)
-	if t.Kind() != reflect.Func {
-		err = fmt.Errorf("funcVar expected to be a func")
-		return
-	}
-
 	pushWrappedGoFunc(ctx, funcVar, t)
-	return
-}
-
-func getPtrSotre(ctx *C.duk_context) (ptr *ptrStore) {
-	ptr = ptrs.getPtrStore(uintptr(unsafe.Pointer(ctx)))
 	return
 }
 
@@ -45,7 +34,7 @@ func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 	idx := int(C.duk_get_int(ctx, -1))
 	C.duk_pop_n(ctx, 2) // [ args ... ]
 
-	ptr := getPtrSotre(ctx)
+	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
 	fnPtr, ok := ptr.lookup(idx)
 	if !ok {
 		return C.DUK_RET_ERROR
@@ -87,7 +76,7 @@ func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 	}
 
 	// 3. array or scalar
-	pushJsValue(ctx, v) // [ args ... v ]
+	pushJsProxyValue(ctx, v) // [ args ... v ]
 	return 1
 }
 
@@ -102,7 +91,7 @@ func pushWrappedGoFunc(ctx *C.duk_context, fnVar interface{}, fnType reflect.Typ
 	var cNativeFunc *C.char
 	getStrPtr(&FUNC_NAME, &cNativeFunc)
 
-	ptr := getPtrSotre(ctx)
+	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
 	idx := ptr.register(&fnVar)
 
 	// [ ... funcName ]

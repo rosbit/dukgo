@@ -27,7 +27,7 @@ func wrapFunc(ctx *C.duk_context, funcName string, helper *elutils.EmbeddingFunc
 		argc := 0
 		itArgs := helper.MakeGoFuncArgs(args)
 		for arg := range itArgs {
-			pushJsValue(ctx, arg)
+			pushJsProxyValue(ctx, arg)
 			argc += 1
 		}
 		// [ global function arg1 arg2 ... argN ]
@@ -47,7 +47,7 @@ func callFunc(ctx *C.duk_context, args ...interface{}) {
 	// [ obj function ]
 	n := len(args)
 	for _, arg := range args {
-		pushJsValue(ctx, arg)
+		pushJsProxyValue(ctx, arg)
 	}
 	// [ obj function arg1 arg2 ... argN ]
 

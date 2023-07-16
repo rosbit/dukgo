@@ -61,9 +61,7 @@ func pushJsValue(ctx *C.duk_context, v interface{}) {
 		pushJsValue(ctx, vv.Elem().Interface())
 		return
 	case reflect.Func:
-		if err := pushGoFunc(ctx, v); err != nil {
-			C.duk_push_undefined(ctx)
-		}
+		pushGoFunc(ctx, v)
 		return
 	default:
 		// return fmt.Errorf("unsupported type %v", vv.Kind())
@@ -75,7 +73,7 @@ func pushJsValue(ctx *C.duk_context, v interface{}) {
 func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
 	var length C.size_t
 
-	switch (C.duk_get_type(ctx, -1)) {
+	switch C.duk_get_type(ctx, -1) {
 	case C.DUK_TYPE_UNDEFINED, C.DUK_TYPE_NULL, C.DUK_TYPE_NONE:
 		return
 	case C.DUK_TYPE_BOOLEAN:

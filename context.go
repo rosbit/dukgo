@@ -43,9 +43,9 @@ func NewContext() (*JsContext, error) {
 }
 
 func freeJsContext(ctx *JsContext) {
-	// fmt.Printf("context freed\n")
+	fmt.Printf("context freed\n")
 	c := ctx.c
-	ptrs.delPtrStore((uintptr(unsafe.Pointer(c))))
+	delPtrStore((uintptr(unsafe.Pointer(c))))
 	C.duk_destroy_heap(c)
 }
 
@@ -106,8 +106,8 @@ func setEnv(ctx *C.duk_context, env map[string]interface{}) {
 
 	for k, _ := range env {
 		v := env[k]
-		pushJsValue(ctx, k)  // [ global k ]
-		pushJsValue(ctx, v)  // [ global k v ]
+		pushString(ctx, k)  // [ global k ]
+		pushJsProxyValue(ctx, v)  // [ global k v ]
 		C.duk_put_prop(ctx, -3) // [ global ] with global[k] = v
 	}
 }
