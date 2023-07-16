@@ -9,10 +9,6 @@ package djs
 // extern duk_ret_t go_struct_handle_set(duk_context *ctx);
 // extern duk_ret_t go_struct_handle_has(duk_context *ctx);
 // extern duk_ret_t go_struct_handle_ownKeys(duk_context *ctx);
-// // extern duk_ret_t goProxyFuncBridge(duk_context *ctx);
-// // extern duk_ret_t go_func_handler_apply(duk_context *ctx);
-// // extern duk_ret_t go_var_handle_get(duk_context *ctx);
-// // extern duk_ret_t go_var_handle_set(duk_context *ctx);
 import "C"
 import (
 	elutils "github.com/rosbit/go-embedding-utils"
@@ -594,98 +590,3 @@ func pushProxyGetterSetter(ctx *C.duk_context, v interface{}, getter, setter C.d
 	C.duk_put_prop_string(ctx, -2, name)  // [ target handler ] with handler[set] = setter
 }
 
-/*
-//export goProxyFuncBridge
-func goProxyFuncBridge(ctx *C.duk_context) C.duk_ret_t {
-	// get pointer of Golang function attached to goFuncBridge
-	// [ args ... ]
-	argc := int(C.duk_get_top(ctx))
-	C.duk_push_current_function(ctx); // [ args ... target ]
-
-	fnPtr, ok := getTargetValue(ctx, -1)
-	C.duk_pop(ctx) // [ args ... ]
-	if !ok {
-		return C.DUK_RET_ERROR
-	}
-	if fnPtr == nil {
-		return C.DUK_RET_ERROR
-	}
-	fnV, ok := fnPtr.(*interface{})
-	if !ok {
-		return C.DUK_RET_ERROR
-	}
-	fn := *fnV
-	fnVal := reflect.ValueOf(fn)
-	if fnVal.Kind() != reflect.Func {
-		return C.DUK_RET_ERROR
-	}
-	fnType := fnVal.Type()
-
-	// make args for Golang function
-	helper := elutils.NewGolangFuncHelperDiretly(fnVal, fnType)
-	getArgs := func(i int) interface{} {
-		C.duk_dup(ctx, C.duk_idx_t(i - argc - 1)) // [ args ... argI ]
-		defer C.duk_pop(ctx) // [ args ... ]
-
-		if goVal, err := fromJsValue(ctx); err == nil {
-			return goVal
-		}
-		return nil
-	}
-	v, e := helper.CallGolangFunc(argc, "djs-func", getArgs) // call Golang function
-
-	// convert result (in var v) of Golang function to that of JS.
-	// 1. error
-	if e != nil {
-		return C.DUK_RET_ERROR
-	}
-
-	// 2. no result
-	if v == nil {
-		return 0 // undefined
-	}
-
-	// 3. array or scalar
-	pushJsValue(ctx, v) // [ args ... v ]
-	return 1
-}
-
-//export go_func_handler_apply
-func go_func_handler_apply(ctx *C.duk_context) C.duk_ret_t {
-	// 'this' binding: handler
-	// [0]: target
-	// [1]: receiver (proxy)
-	// [2]: argArray
-	//
-	C.duk_dup(ctx, 0) // [ ... target ]
-	nargs := C.duk_get_length(ctx, 2)
-	argc := int(nargs)
-	for i:=0; i<argc; i++ {
-		C.duk_get_prop_index(ctx, 2, C.duk_uarridx_t(i)) // [ ... target ... i-th-value ]
-	}
-
-	// call target function
-	C.duk_call(ctx, C.int(nargs)) // [ ... target-result ]
-	return 1
-}
-
-func pushGoFuncProxy(ctx *C.duk_context, v interface{}) {
-	fnType := reflect.TypeOf(v)
-	argc := fnType.NumIn()
-	nargs := C.int(C.DUK_VARARGS)
-	if !fnType.IsVariadic() {
-		nargs = C.int(argc)
-	}
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.goProxyFuncBridge), nargs)  // [ target ]
-	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
-	idx := ptr.register(&v)
-	C.duk_push_int(ctx, C.int(idx)) // [ target idx ]
-	var name *C.char
-	getStrPtr(&idxName, &name)
-	C.duk_put_prop_string(ctx, -2, name)  // [ target ] with target[name] = idx
-	// C.duk_push_object(ctx)     // [ target handler ]
-	// C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_func_handler_apply), 3) // [ target handle go_func_handler_apply ]
-	// getStrPtr(&apply, &name)
-	// C.duk_put_prop_string(ctx, -2, name)  // [ target handle ] with handler[apply] = go_func_handler_apply
-	// C.duk_push_proxy(ctx, 0) // [ target-proxy ]
-}*/

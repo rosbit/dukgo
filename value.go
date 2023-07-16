@@ -4,71 +4,10 @@ package djs
 // static const char *getCString(duk_context *ctx, duk_idx_t idx);
 import "C"
 import (
-	"reflect"
 	"unsafe"
 	"fmt"
 	"strings"
 )
-
-func pushJsValue(ctx *C.duk_context, v interface{}) {
-	if v == nil {
-		C.duk_push_null(ctx)
-		return
-	}
-
-	vv := reflect.ValueOf(v)
-	switch vv.Kind() {
-	case reflect.Bool:
-		if v.(bool) {
-			C.duk_push_true(ctx)
-		} else {
-			C.duk_push_false(ctx)
-		}
-		return
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		C.duk_push_number(ctx, C.duk_double_t(vv.Int()))
-		return
-	case reflect.Uint,reflect.Uint8,reflect.Uint16,reflect.Uint32,reflect.Uint64:
-		C.duk_push_number(ctx, C.duk_double_t(vv.Uint()))
-		return
-	case reflect.Float32, reflect.Float64:
-		C.duk_push_number(ctx, C.duk_double_t(vv.Float()))
-		return
-	case reflect.String:
-		pushString(ctx, v.(string))
-		return
-	case reflect.Slice:
-		t := vv.Type()
-		if t.Elem().Kind() == reflect.Uint8 {
-			pushString(ctx, string(v.([]byte)))
-			return
-		}
-		fallthrough
-	case reflect.Array:
-		pushArr(ctx, vv)
-		return
-	case reflect.Map:
-		pushObj(ctx, vv)
-		return
-	case reflect.Struct:
-		pushStruct(ctx, vv)
-		return
-	case reflect.Ptr:
-		if vv.Elem().Kind() == reflect.Struct {
-			pushStruct(ctx, vv)
-			return
-		}
-		pushJsValue(ctx, vv.Elem().Interface())
-		return
-	case reflect.Func:
-		pushGoFunc(ctx, v)
-		return
-	default:
-		// return fmt.Errorf("unsupported type %v", vv.Kind())
-		C.duk_push_undefined(ctx)
-		return
-	}
-}
 
 func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
 	var length C.size_t
@@ -177,90 +116,6 @@ func pushString(ctx *C.duk_context, s string) {
 	var sLen C.int
 	getStrPtrLen(&s, &cstr, &sLen)
 	C.duk_push_lstring(ctx, cstr, C.size_t(sLen))
-}
-
-func pushArr(ctx *C.duk_context, v reflect.Value) {
-	arr_idx := C.duk_push_array(ctx) // [ arr ]
-	if v.IsNil() {
-		return
-	}
-
-	l := v.Len()
-	for i:=0; i<l; i++ {
-		elm := v.Index(i).Interface()
-		pushJsValue(ctx, elm) // [ arr elm ]
-		C.duk_put_prop_index(ctx, arr_idx, C.duk_uarridx_t(i)) // [ arr ] with arr[i] = elm
-	}
-}
-
-func pushObj(ctx *C.duk_context, v reflect.Value) {
-	C.duk_push_object(ctx) // [ obj ]
-	if v.IsNil() {
-		return
-	}
-
-	mr := v.MapRange()
-	for mr.Next() {
-		k := mr.Key()
-		v := mr.Value()
-
-		pushJsValue(ctx, k.Interface()) // [ obj k ]
-		pushJsValue(ctx, v.Interface()) // [ obj k v ]
-
-		C.duk_put_prop(ctx, -3) // [ obj ] with obj[k] = v
-	}
-}
-
-// struct
-func pushStruct(ctx *C.duk_context, structVar reflect.Value) {
-	var structE reflect.Value
-	if structVar.Kind() == reflect.Ptr {
-		structE = structVar.Elem()
-	} else {
-		structE = structVar
-	}
-	structT := structE.Type()
-
-	if structE == structVar {
-		// struct is unaddressable, so make a copy of struct to an Elem of struct-pointer.
-		// NOTE: changes of the copied struct cannot effect the original one. it is recommended to use the pointer of struct.
-		structVar = reflect.New(structT) // make a struct pointer
-		structVar.Elem().Set(structE)    // copy the old struct
-		structE = structVar.Elem()       // structE is the copied struct
-	}
-
-	obj_idx := C.duk_push_object(ctx) // [ obj ]
-	for i:=0; i<structT.NumField(); i++ {
-		name := structT.Field(i).Name
-		fv := structE.FieldByName(name)
-
-		if !fv.CanInterface() {
-			continue
-		}
-
-		lName := lowerFirst(name)
-		pushString(ctx, lName)          // [ obj lName ]
-		pushJsValue(ctx, fv.Interface()) // [ obj lName fv ]
-		C.duk_put_prop(ctx, obj_idx) // [ obj ] with obj[lName] = fv
-	}
-
-	pushStructMethods(ctx, structE, structT)
-	t := structVar.Type()
-	pushStructMethods(ctx, structVar, t)
-}
-
-func pushStructMethods(ctx *C.duk_context, structE reflect.Value, structT reflect.Type) {
-	for i:=0; i<structE.NumMethod(); i++ {
-		name := structT.Method(i).Name
-		fv := structE.Method(i)
-		if !fv.CanInterface() {
-			continue
-		}
-		lName := lowerFirst(name)
-		pushString(ctx, lName)          // [ obj lName ]
-		pushGoFunc(ctx, fv.Interface()) // [ obj lName fv ]
-		C.duk_put_prop(ctx, -3)    // [ obj ] with obj[lName] = fv
-	}
 }
 
 func lowerFirst(name string) string {
