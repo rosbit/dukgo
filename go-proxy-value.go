@@ -68,11 +68,9 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 		pushJsProxyValue(ctx, vv.Elem().Interface())
 		return
 	case reflect.Func:
-		// pushGoFuncProxy(ctx, v)
 		pushGoFunc(ctx, v)
 		return
 	default:
-		// return fmt.Errorf("unsupported type %v", vv.Kind())
 		C.duk_push_undefined(ctx)
 		return
 	}
@@ -200,8 +198,8 @@ func go_arr_handle_set(ctx *C.duk_context) C.duk_ret_t {
 
 func pushArrProxy(ctx *C.duk_context, v interface{}) {
 	C.duk_push_array(ctx) // [ arr ]
-	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_arr_handle_get), (C.duk_c_function)(C.go_arr_handle_set))  // [ arr proxy ]
-	C.duk_push_proxy(ctx, 0) // [ arr-proxy ]
+	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_arr_handle_get), (C.duk_c_function)(C.go_arr_handle_set))  // [ arr handler ]
+	bindProxyTarget(ctx) // [ arr-proxy ]
 }
 
 //export go_map_handle_get
@@ -297,8 +295,8 @@ func go_map_handle_set(ctx *C.duk_context) C.duk_ret_t {
 }
 func pushMapProxy(ctx *C.duk_context, v interface{}) {
 	C.duk_push_object(ctx)   // [ obj ]
-	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_map_handle_get), (C.duk_c_function)(C.go_map_handle_set)) // [ obj proxy ]
-	C.duk_push_proxy(ctx, 0) // [ obj-proxy ]
+	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_map_handle_get), (C.duk_c_function)(C.go_map_handle_set)) // [ obj handler ]
+	bindProxyTarget(ctx) // [ obj-proxy ]
 }
 
 //export go_struct_handle_get
@@ -313,7 +311,6 @@ func go_struct_handle_get(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 	key := C.GoString(C.duk_get_string(ctx, 1))
-	// fmt.Printf("-- key: %s\n", key)
 	v, ok := getTargetValue(ctx)
 	if !ok {
 		C.duk_push_undefined(ctx)
@@ -344,10 +341,8 @@ func go_struct_handle_get(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 	name := upperFirst(key)
-	// fmt.Printf("-- name: %s\n", name)
 	fv := structE.FieldByName(name)
 	if !fv.IsValid() {
-		// fmt.Printf("-- field %s not found\n", name)
 		fv = structE.MethodByName(name)
 		if !fv.IsValid() {
 			if structE == structVar {
@@ -360,7 +355,6 @@ func go_struct_handle_get(ctx *C.duk_context) C.duk_ret_t {
 				return 1
 			}
 		}
-		// fmt.Printf("-- method %s got\n", name)
 		if fv.CanInterface() {
 			pushGoFunc(ctx, fv.Interface())
 			return 1
@@ -392,7 +386,6 @@ func go_struct_handle_set(ctx *C.duk_context) C.duk_ret_t {
 
 	C.duk_dup(ctx, 2) // [ ... val ]
 	goVal, err := fromJsValue(ctx)
-	// fmt.Printf("-- goVal: %v\n", goVal)
 	C.duk_pop(ctx)    // [ ... ]
 	if err != nil {
 		C.duk_push_false(ctx)
@@ -424,7 +417,6 @@ func go_struct_handle_set(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 	name := upperFirst(key)
-	// fmt.Printf("-- field name: %s\n", name)
 	fv := structE.FieldByName(name)
 	if !fv.IsValid() {
 		C.duk_push_false(ctx)
@@ -446,7 +438,6 @@ func go_struct_handle_has(ctx *C.duk_context) C.duk_ret_t {
 	// 'this' binding: handler
 	// [0]: target
 	// [1]: key
-	// fmt.Printf("--- go_struct_handle_has called\n")
 	if C.duk_is_string(ctx, 1) == 0 {
 		C.duk_push_false(ctx)
 		return 1
@@ -482,7 +473,6 @@ func go_struct_handle_has(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 	name := upperFirst(key)
-	// fmt.Printf("-- field name: %s\n", name)
 	fv := structE.FieldByName(name)
 	if !fv.IsValid() {
 		C.duk_push_false(ctx)
@@ -536,7 +526,7 @@ func go_struct_handle_ownKeys(ctx *C.duk_context) C.duk_ret_t {
 // struct
 func pushStructProxy(ctx *C.duk_context, v interface{}) {
 	C.duk_push_object(ctx) // [ obj ]
-	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_struct_handle_get), (C.duk_c_function)(C.go_struct_handle_set)) // [ obj proxy ]
+	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_struct_handle_get), (C.duk_c_function)(C.go_struct_handle_set)) // [ obj handler ]
 
 	var name *C.char
 	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_struct_handle_has), 2) // [ obj handler has-handler ]
@@ -566,7 +556,7 @@ func pushStructProxy(ctx *C.duk_context, v interface{}) {
 	C.duk_push_int(ctx, C.duk_int_t(length)) // [ obj handler "length" num-field ]
 	C.duk_put_prop(ctx, -3) // [ obj handler ] with handler[length] = num-field
 
-	C.duk_push_proxy(ctx, 0) // [ obj-proxy ]
+	bindProxyTarget(ctx) // [ obj-proxy ]
 }
 
 func pushProxyGetterSetter(ctx *C.duk_context, v interface{}, getter, setter C.duk_c_function) {
@@ -590,3 +580,37 @@ func pushProxyGetterSetter(ctx *C.duk_context, v interface{}, getter, setter C.d
 	C.duk_put_prop_string(ctx, -2, name)  // [ target handler ] with handler[set] = setter
 }
 
+func bindProxyTarget(ctx *C.duk_context) {
+	var name *C.char
+
+	// [ target handler ]
+	C.duk_dup(ctx, -2) // [ target handler copied-target ]
+	C.duk_dup(ctx, -2) // [ target handler copied-target copied-handler ]
+	C.duk_push_proxy(ctx, 0) // [ target handler proxy(target,handler) ]
+
+	C.duk_dup(ctx, -3) // [ target handler proxy copied-target ]
+	getStrPtr(&target, &name)
+	C.duk_put_prop_string(ctx, -2, name) // [ target handler proxy ] with proxy[target] = target
+
+	C.duk_remove(ctx, -2)  // [ target proxy ]
+	C.duk_replace(ctx, -2) // [ proxy ]
+}
+
+func getBoundProxyTarget(ctx *C.duk_context) (targetV interface{}, isProxy bool, err error) {
+	var name *C.char
+
+	// [ proxy ]
+	getStrPtr(&target, &name)
+	isProxy = C.duk_get_prop_string(ctx, -1, name) != 0 // [ proxy target/undefined ]
+	defer C.duk_pop(ctx) // [ proxy ] target/undefned poped
+
+	if isProxy {
+		v, ok := getTargetValue(ctx, -1)
+		if !ok {
+			err = fmt.Errorf("no target found")
+			return
+		}
+		targetV = v
+	}
+	return
+}

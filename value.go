@@ -4,6 +4,7 @@ package djs
 // static const char *getCString(duk_context *ctx, duk_idx_t idx);
 import "C"
 import (
+	"reflect"
 	"unsafe"
 	"fmt"
 	"strings"
@@ -70,6 +71,11 @@ func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
 
 func fromJsArr(ctx *C.duk_context) (goVal interface{}, err error) {
 	// [ ... arr ]
+	var isProxy bool
+	if goVal, isProxy, err = getBoundProxyTarget(ctx); err != nil || isProxy {
+		return
+	}
+
 	l := C.duk_get_length(ctx, -1)
 	if l == 0 {
 		goVal = []interface{}{}
@@ -92,6 +98,23 @@ func fromJsArr(ctx *C.duk_context) (goVal interface{}, err error) {
 
 func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
 	// [ ... obj ]
+	v, isProxy, e := getBoundProxyTarget(ctx)
+	if e != nil {
+		err = e
+		return
+	}
+	if isProxy {
+		switch vv := reflect.ValueOf(v); vv.Kind() {
+		case reflect.Map, reflect.Struct:
+			goVal = v
+		case reflect.Ptr:
+			goVal = vv.Elem().Interface()
+		default:
+			err = fmt.Errorf("unknown type")
+		}
+		return
+	}
+
 	C.duk_enum(ctx, -1, 0) // [ ... obj enum ]
 	res := make(map[string]interface{})
 	for C.duk_next(ctx, -1, 1) != 0 {
