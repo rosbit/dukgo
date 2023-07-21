@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"unsafe"
 	"fmt"
-	"strings"
 )
 
 func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
@@ -132,19 +131,5 @@ func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
 	C.duk_pop(ctx) // [ ... obj ]
 	goVal = res
 	return
-}
-
-func pushString(ctx *C.duk_context, s string) {
-	var cstr *C.char
-	var sLen C.int
-	getStrPtrLen(&s, &cstr, &sLen)
-	C.duk_push_lstring(ctx, cstr, C.size_t(sLen))
-}
-
-func lowerFirst(name string) string {
-	return strings.ToLower(name[:1]) + name[1:]
-}
-func upperFirst(name string) string {
-	return strings.ToUpper(name[:1]) + name[1:]
 }
 

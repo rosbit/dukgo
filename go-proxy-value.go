@@ -1,20 +1,16 @@
 package djs
 
 // #include "duktape.h"
-// extern duk_ret_t go_arr_handle_get(duk_context *ctx);
-// extern duk_ret_t go_arr_handle_set(duk_context *ctx);
-// extern duk_ret_t go_map_handle_get(duk_context *ctx);
-// extern duk_ret_t go_map_handle_set(duk_context *ctx);
-// extern duk_ret_t go_struct_handle_get(duk_context *ctx);
-// extern duk_ret_t go_struct_handle_set(duk_context *ctx);
-// extern duk_ret_t go_struct_handle_has(duk_context *ctx);
-// extern duk_ret_t go_struct_handle_ownKeys(duk_context *ctx);
+// extern duk_ret_t go_obj_get(duk_context *ctx);
+// extern duk_ret_t go_obj_set(duk_context *ctx);
+// extern duk_ret_t go_obj_has(duk_context *ctx);
 import "C"
 import (
 	elutils "github.com/rosbit/go-embedding-utils"
 	"reflect"
 	"unsafe"
 	"fmt"
+	"strings"
 )
 
 func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
@@ -52,17 +48,17 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 		}
 		fallthrough
 	case reflect.Array:
-		pushArrProxy(ctx, v)
+		C.duk_push_bare_array(ctx)
+		makeProxyObject(ctx, v)
 		return
-	case reflect.Map:
-		pushMapProxy(ctx, v)
-		return
-	case reflect.Struct:
-		pushStructProxy(ctx, v)
+	case reflect.Map, reflect.Struct:
+		C.duk_push_bare_object(ctx)
+		makeProxyObject(ctx, v)
 		return
 	case reflect.Ptr:
 		if vv.Elem().Kind() == reflect.Struct {
-			pushStructProxy(ctx, v)
+			C.duk_push_bare_object(ctx)
+			makeProxyObject(ctx, v)
 			return
 		}
 		pushJsProxyValue(ctx, vv.Elem().Interface())
@@ -102,51 +98,41 @@ func getTargetValue(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (v interface{}
 	return
 }
 
-//export go_arr_handle_get
-func go_arr_handle_get(ctx *C.duk_context) C.duk_ret_t {
+func go_arr_get(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
 	/* 'this' binding: handler
 	 * [0]: target
 	 * [1]: key
 	 * [2]: receiver (proxy)
 	 */
+	if C.duk_is_string(ctx, 1) != 0 {
+		key := C.GoString(C.duk_get_string(ctx, 1))
+		if key == "length" {
+			C.duk_push_int(ctx, C.duk_int_t(vv.Len()))
+			return 1
+		}
+		C.duk_push_undefined(ctx)
+		return 1
+	}
 	if C.duk_is_number(ctx, 1) == 0 {
 		C.duk_push_undefined(ctx)
 		return 1
 	}
 	key := int(C.duk_to_int(ctx, 1))
-	v, ok := getTargetValue(ctx)
-	if !ok {
+	l := vv.Len()
+	if key < 0 || key >= l {
 		C.duk_push_undefined(ctx)
 		return 1
 	}
-	if v == nil {
+	val := vv.Index(key)
+	if !val.IsValid() || !val.CanInterface() {
 		C.duk_push_undefined(ctx)
 		return 1
 	}
-	vv := reflect.ValueOf(v)
-	switch vv.Kind() {
-	case reflect.Slice, reflect.Array:
-		l := vv.Len()
-		if key < 0 || key >= l {
-			C.duk_push_undefined(ctx)
-			return 1
-		}
-		val := vv.Index(key)
-		if !val.IsValid() || !val.CanInterface() {
-			C.duk_push_undefined(ctx)
-			return 1
-		}
-		pushJsProxyValue(ctx, val.Interface())
-		return 1
-	default:
-		C.duk_push_undefined(ctx)
-		return 1
-	}
+	pushJsProxyValue(ctx, val.Interface())
 	return 1
 }
 
-//export go_arr_handle_set
-func go_arr_handle_set(ctx *C.duk_context) C.duk_ret_t {
+func go_arr_set(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
 	/* 'this' binding: handler
 	 * [0]: target
 	 * [1]: key
@@ -167,43 +153,52 @@ func go_arr_handle_set(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 
-	v, ok := getTargetValue(ctx)
-	if !ok {
+	l := vv.Len()
+	if key < 0 || key >= l {
 		C.duk_push_false(ctx)
 		return 1
 	}
-	vv := reflect.ValueOf(v)
-	switch vv.Kind() {
-	case reflect.Slice, reflect.Array:
-		l := vv.Len()
-		if key < 0 || key >= l {
-			C.duk_push_false(ctx)
+	dest := vv.Index(key)
+	if _, ok := goVal.(string); ok {
+		goVal = fmt.Sprintf("%s", goVal) // deep copy
+	}
+	if err = elutils.SetValue(dest, goVal); err != nil {
+		C.duk_push_false(ctx)
+	} else {
+		C.duk_push_true(ctx)
+	}
+	return 1
+}
+
+func go_arr_has(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
+	/* 'this' binding: handler
+	 * [0]: target
+	 * [1]: key
+	 */
+	if C.duk_is_string(ctx, 1) != 0 {
+		key := C.GoString(C.duk_get_string(ctx, 1))
+		if key == "length" {
+			C.duk_push_true(ctx)
 			return 1
 		}
-		dest := vv.Index(key)
-		if _, ok = goVal.(string); ok {
-			goVal = fmt.Sprintf("%s", goVal) // deep copy
-		}
-		if err = elutils.SetValue(dest, goVal); err != nil {
-			C.duk_push_false(ctx)
-		} else {
-			C.duk_push_true(ctx)
-		}
-		return 1
-	default:
 		C.duk_push_false(ctx)
 		return 1
 	}
+	if C.duk_is_number(ctx, 1) == 0 {
+		C.duk_push_false(ctx)
+		return 1
+	}
+	key := int(C.duk_to_int(ctx, 1))
+	l := vv.Len()
+	if key < 0 || key >= l {
+		C.duk_push_false(ctx)
+		return 1
+	}
+	C.duk_push_true(ctx)
+	return 1
 }
 
-func pushArrProxy(ctx *C.duk_context, v interface{}) {
-	C.duk_push_array(ctx) // [ arr ]
-	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_arr_handle_get), (C.duk_c_function)(C.go_arr_handle_set))  // [ arr handler ]
-	bindProxyTarget(ctx) // [ arr-proxy ]
-}
-
-//export go_map_handle_get
-func go_map_handle_get(ctx *C.duk_context) C.duk_ret_t {
+func go_map_get(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
 	/* 'this' binding: handler
 	 * [0]: target
 	 * [1]: key
@@ -214,34 +209,16 @@ func go_map_handle_get(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 	key := C.GoString(C.duk_get_string(ctx, 1))
-	v, ok := getTargetValue(ctx)
-	if !ok {
+	val := vv.MapIndex(reflect.ValueOf(key))
+	if !val.IsValid() || !val.CanInterface() {
 		C.duk_push_undefined(ctx)
 		return 1
 	}
-	if v == nil {
-		C.duk_push_undefined(ctx)
-		return 1
-	}
-	vv := reflect.ValueOf(v)
-	switch vv.Kind() {
-	case reflect.Map:
-		val := vv.MapIndex(reflect.ValueOf(key))
-		if !val.IsValid() || !val.CanInterface() {
-			C.duk_push_undefined(ctx)
-			return 1
-		}
-		pushJsProxyValue(ctx, val.Interface())
-		return 1
-	default:
-		C.duk_push_undefined(ctx)
-		return 1
-	}
+	pushJsProxyValue(ctx, val.Interface())
 	return 1
 }
 
-//export go_map_handle_set
-func go_map_handle_set(ctx *C.duk_context) C.duk_ret_t {
+func go_map_set(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
 	/* 'this' binding: handler
 	 * [0]: target
 	 * [1]: key
@@ -262,45 +239,41 @@ func go_map_handle_set(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 
-	v, ok := getTargetValue(ctx)
-	if !ok {
-		C.duk_push_false(ctx)
-		return 1
+	mapT := vv.Type()
+	elType := mapT.Elem()
+	dest := elutils.MakeValue(elType)
+	if _, ok := goVal.(string); ok {
+		goVal = fmt.Sprintf("%s", goVal) // deep copy
 	}
-	if v == nil {
+	if err = elutils.SetValue(dest, goVal); err == nil {
+		vv.SetMapIndex(reflect.ValueOf(key), dest)
+		C.duk_push_true(ctx)
+	} else {
 		C.duk_push_false(ctx)
-		return 1
-	}
-	vv := reflect.ValueOf(v)
-	switch vv.Kind() {
-	case reflect.Map:
-		mapT := vv.Type()
-		elType := mapT.Elem()
-		dest := elutils.MakeValue(elType)
-		if _, ok = goVal.(string); ok {
-			goVal = fmt.Sprintf("%s", goVal) // deep copy
-		}
-		if err = elutils.SetValue(dest, goVal); err == nil {
-			vv.SetMapIndex(reflect.ValueOf(key), dest)
-			C.duk_push_true(ctx)
-		} else {
-			C.duk_push_false(ctx)
-		}
-		return 1
-	default:
-		C.duk_push_undefined(ctx)
-		return 1
 	}
 	return 1
 }
-func pushMapProxy(ctx *C.duk_context, v interface{}) {
-	C.duk_push_object(ctx)   // [ obj ]
-	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_map_handle_get), (C.duk_c_function)(C.go_map_handle_set)) // [ obj handler ]
-	bindProxyTarget(ctx) // [ obj-proxy ]
+
+func go_map_has(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
+	/* 'this' binding: handler
+	 * [0]: target
+	 * [1]: key
+	 */
+	if C.duk_is_string(ctx, 1) == 0 {
+		C.duk_push_false(ctx)
+		return 1
+	}
+	key := C.GoString(C.duk_get_string(ctx, 1))
+	val := vv.MapIndex(reflect.ValueOf(key))
+	if !val.IsValid() {
+		C.duk_push_false(ctx)
+	} else {
+		C.duk_push_true(ctx)
+	}
+	return 1
 }
 
-//export go_struct_handle_get
-func go_struct_handle_get(ctx *C.duk_context) C.duk_ret_t {
+func go_struct_get(ctx *C.duk_context, structVar reflect.Value) C.duk_ret_t {
 	/* 'this' binding: handler
 	 * [0]: target
 	 * [1]: key
@@ -311,16 +284,6 @@ func go_struct_handle_get(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 	key := C.GoString(C.duk_get_string(ctx, 1))
-	v, ok := getTargetValue(ctx)
-	if !ok {
-		C.duk_push_undefined(ctx)
-		return 1
-	}
-	if v == nil {
-		C.duk_push_undefined(ctx)
-		return 1
-	}
-	structVar := reflect.ValueOf(v)
 	var structE reflect.Value
 	switch structVar.Kind() {
 	case reflect.Struct:
@@ -333,11 +296,6 @@ func go_struct_handle_get(ctx *C.duk_context) C.duk_ret_t {
 		structE = structVar.Elem()
 	default:
 		C.duk_push_undefined(ctx)
-		return 1
-	}
-	if key == "length" {
-		structT := structE.Type()
-		C.duk_push_int(ctx, C.duk_int_t(structT.NumField()))
 		return 1
 	}
 	name := upperFirst(key)
@@ -370,8 +328,7 @@ func go_struct_handle_get(ctx *C.duk_context) C.duk_ret_t {
 	return 1
 }
 
-//export go_struct_handle_set
-func go_struct_handle_set(ctx *C.duk_context) C.duk_ret_t {
+func go_struct_set(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
 	/* 'this' binding: handler
 	 * [0]: target
 	 * [1]: key
@@ -392,16 +349,6 @@ func go_struct_handle_set(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 
-	v, ok := getTargetValue(ctx)
-	if !ok {
-		C.duk_push_false(ctx)
-		return 1
-	}
-	if v == nil {
-		C.duk_push_false(ctx)
-		return 1
-	}
-	vv := reflect.ValueOf(v)
 	var structE reflect.Value
 	switch vv.Kind() {
 	case reflect.Struct:
@@ -422,7 +369,7 @@ func go_struct_handle_set(ctx *C.duk_context) C.duk_ret_t {
 		C.duk_push_false(ctx)
 		return 1
 	}
-	if _, ok = goVal.(string); ok {
+	if _, ok := goVal.(string); ok {
 		goVal = fmt.Sprintf("%s", goVal) // deep copy
 	}
 	if err = elutils.SetValue(fv, goVal); err != nil {
@@ -433,8 +380,7 @@ func go_struct_handle_set(ctx *C.duk_context) C.duk_ret_t {
 	return 1
 }
 
-//export go_struct_handle_has
-func go_struct_handle_has(ctx *C.duk_context) C.duk_ret_t {
+func go_struct_has(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
 	// 'this' binding: handler
 	// [0]: target
 	// [1]: key
@@ -443,21 +389,7 @@ func go_struct_handle_has(ctx *C.duk_context) C.duk_ret_t {
 		return 1
 	}
 	key := C.GoString(C.duk_get_string(ctx, 1))
-	if key == "length" {
-		C.duk_push_true(ctx)
-		return 1
-	}
 
-	v, ok := getTargetValue(ctx)
-	if !ok {
-		C.duk_push_false(ctx)
-		return 1
-	}
-	if v == nil {
-		C.duk_push_false(ctx)
-		return 1
-	}
-	vv := reflect.ValueOf(v)
 	var structE reflect.Value
 	switch vv.Kind() {
 	case reflect.Struct:
@@ -482,10 +414,13 @@ func go_struct_handle_has(ctx *C.duk_context) C.duk_ret_t {
 	return 1
 }
 
-//export go_struct_handle_ownKeys
-func go_struct_handle_ownKeys(ctx *C.duk_context) C.duk_ret_t {
-	// 'this' binding: handler
-	// [0]: target
+//export go_obj_get
+func go_obj_get(ctx *C.duk_context) C.duk_ret_t {
+	/* 'this' binding: handler
+	 * [0]: target
+	 * [1]: key
+	 * [2]: receiver (proxy)
+	 */
 	v, ok := getTargetValue(ctx)
 	if !ok {
 		C.duk_push_undefined(ctx)
@@ -495,105 +430,87 @@ func go_struct_handle_ownKeys(ctx *C.duk_context) C.duk_ret_t {
 		C.duk_push_undefined(ctx)
 		return 1
 	}
-	vv := reflect.ValueOf(v)
-	var structE reflect.Value
-	switch vv.Kind() {
-	case reflect.Struct:
-		structE = vv
-	case reflect.Ptr:
-		if vv.Elem().Kind() != reflect.Struct {
-			C.duk_push_undefined(ctx)
-			return 1
-		}
-		structE = vv.Elem()
+	switch vv := reflect.ValueOf(v); vv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return go_arr_get(ctx, vv)
+	case reflect.Map:
+		return go_map_get(ctx, vv)
+	case reflect.Struct, reflect.Ptr:
+		return go_struct_get(ctx, vv)
 	default:
 		C.duk_push_undefined(ctx)
 		return 1
 	}
-
-	C.duk_push_array(ctx) // [ arr ]
-	structT := structE.Type()
-	for i:=0; i<structT.NumField(); i++ {
-		name := structT.Field(i).Name
-		lName := lowerFirst(name)
-		pushString(ctx, lName) // [ arr key ]
-		C.duk_put_prop_index(ctx, -2, C.duk_uarridx_t(i)) // [ arr ] with arr[i] = key
-	}
-
-	return 1
 }
 
-// struct
-func pushStructProxy(ctx *C.duk_context, v interface{}) {
-	C.duk_push_object(ctx) // [ obj ]
-	pushProxyGetterSetter(ctx, v, (C.duk_c_function)(C.go_struct_handle_get), (C.duk_c_function)(C.go_struct_handle_set)) // [ obj handler ]
-
-	var name *C.char
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_struct_handle_has), 2) // [ obj handler has-handler ]
-	getStrPtr(&has, &name)
-	C.duk_put_prop_string(ctx, -2, name) // [ obj handler ] with handler[has] = has-handler
-
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_struct_handle_ownKeys), 1) // [ obj handler ownKeys-handler ]
-	getStrPtr(&ownKeys, &name)
-	C.duk_put_prop_string(ctx, -2, name) // [ obj handler ] with handler[ownKeys] = ownKeys-handler
-
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_struct_handle_ownKeys), 1) // [ obj handler ownKeys-handler ]
-	getStrPtr(&enumerate, &name)
-	C.duk_put_prop_string(ctx, -2, name) // [ obj handler ] with handler[enumerate] = ownKeys-handler
-
-	vv := reflect.ValueOf(v)
-	var length int
-	switch vv.Kind() {
-	case reflect.Struct:
-		structT := vv.Type()
-		length = structT.NumField()
-	case reflect.Ptr:
-		structT := vv.Elem().Type()
-		length = structT.NumField()
+//export go_obj_set
+func go_obj_set(ctx *C.duk_context) C.duk_ret_t {
+	/* 'this' binding: handler
+	 * [0]: target
+	 * [1]: key
+	 * [2]: val
+	 * [3]: receiver (proxy)
+	 */
+	v, ok := getTargetValue(ctx)
+	if !ok {
+		C.duk_push_false(ctx)
+		return 1
+	}
+	if v == nil {
+		C.duk_push_false(ctx)
+		return 1
+	}
+	switch vv := reflect.ValueOf(v); vv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return go_arr_set(ctx, vv)
+	case reflect.Map:
+		return go_map_set(ctx, vv)
+	case reflect.Struct, reflect.Ptr:
+		return go_struct_set(ctx, vv)
 	default:
+		C.duk_push_false(ctx)
+		return 1
 	}
-	pushString(ctx, "length") // [ obj handler "length" ]
-	C.duk_push_int(ctx, C.duk_int_t(length)) // [ obj handler "length" num-field ]
-	C.duk_put_prop(ctx, -3) // [ obj handler ] with handler[length] = num-field
-
-	bindProxyTarget(ctx) // [ obj-proxy ]
 }
 
-func pushProxyGetterSetter(ctx *C.duk_context, v interface{}, getter, setter C.duk_c_function) {
-	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
-	idx := ptr.register(&v)
-
-	// [ target ]
-	C.duk_push_int(ctx, C.int(idx)) // [ target idx ]
-	var name *C.char
-	getStrPtr(&idxName, &name)
-	C.duk_put_prop_string(ctx, -2, name)  // [ target ] with taget[name] = idx
-
-	C.duk_push_object(ctx)  // [ target handler ]
-
-	C.duk_push_c_function(ctx, getter, 3) // [ target handler getter ]
-	getStrPtr(&get, &name)
-	C.duk_put_prop_string(ctx, -2, name)  // [ target handler ] with handler[get] = getter
-
-	C.duk_push_c_function(ctx, setter, 4) // [ target handler setter ]
-	getStrPtr(&set, &name)
-	C.duk_put_prop_string(ctx, -2, name)  // [ target handler ] with handler[set] = setter
+//export go_obj_has
+func go_obj_has(ctx *C.duk_context) C.duk_ret_t {
+	// 'this' binding: handler
+	// [0]: target
+	// [1]: key
+	v, ok := getTargetValue(ctx)
+	if !ok {
+		C.duk_push_false(ctx)
+		return 1
+	}
+	if v == nil {
+		C.duk_push_false(ctx)
+		return 1
+	}
+	switch vv := reflect.ValueOf(v); vv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return go_arr_has(ctx, vv)
+	case reflect.Map:
+		return go_map_has(ctx, vv)
+	case reflect.Struct, reflect.Ptr:
+		return go_struct_has(ctx, vv)
+	default:
+		C.duk_push_false(ctx)
+		return 1
+	}
 }
 
 func bindProxyTarget(ctx *C.duk_context) {
 	var name *C.char
 
 	// [ target handler ]
-	C.duk_dup(ctx, -2) // [ target handler copied-target ]
-	C.duk_dup(ctx, -2) // [ target handler copied-target copied-handler ]
-	C.duk_push_proxy(ctx, 0) // [ target handler proxy(target,handler) ]
+	C.duk_dup(ctx, -2)       // [ target handler copied-target ]
+	C.duk_swap(ctx, -2, -1)  // [ target copied-target handler ]
+	C.duk_push_proxy(ctx, 0) // [ target proxy(target,handler) ]
 
-	C.duk_dup(ctx, -3) // [ target handler proxy copied-target ]
+	C.duk_swap(ctx, -2, -1)  // [ proxy handler ]
 	getStrPtr(&target, &name)
-	C.duk_put_prop_string(ctx, -2, name) // [ target handler proxy ] with proxy[target] = target
-
-	C.duk_remove(ctx, -2)  // [ target proxy ]
-	C.duk_replace(ctx, -2) // [ proxy ]
+	C.duk_put_prop_string(ctx, -2, name) // [ proxy ] with proxy["target"] = target
 }
 
 func getBoundProxyTarget(ctx *C.duk_context) (targetV interface{}, isProxy bool, err error) {
@@ -614,3 +531,56 @@ func getBoundProxyTarget(ctx *C.duk_context) (targetV interface{}, isProxy bool,
 	}
 	return
 }
+
+func makeProxyObject(ctx *C.duk_context, v interface{}) {
+	var name *C.char
+
+	// [ target ]
+	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
+	idx := ptr.register(&v)
+	C.duk_push_int(ctx, C.int(idx)) // [ target idx ]
+	getStrPtr(&idxName, &name)
+	C.duk_put_prop_string(ctx, -2, name)  // [ target ] with taget[name] = idx
+
+	getStrPtr(&goObjProxyHandler, &name)
+	C.duk_get_global_string(ctx, name) // [ target handler ]
+
+	bindProxyTarget(ctx) // [ Proxy(target,handler) ]
+}
+
+func registerGoObjProxyHandler(ctx *C.duk_context) {
+	var name *C.char
+
+	C.duk_push_object(ctx)  // [ handler ]
+
+	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_obj_get), 3) // [ handler getter ]
+	getStrPtr(&get, &name)
+	C.duk_put_prop_string(ctx, -2, name)  // [ handler ] with handler[get] = getter
+
+	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_obj_set), 4) // [ handler setter ]
+	getStrPtr(&set, &name)
+	C.duk_put_prop_string(ctx, -2, name)  // [ handler ] with handler[set] = setter
+
+	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_obj_has), 2) // [ handler has-handler ]
+	getStrPtr(&has, &name)
+	C.duk_put_prop_string(ctx, -2, name) // [ handler ] with handler[has] = has-handler
+
+	getStrPtr(&goObjProxyHandler, &name)
+	C.duk_put_global_string(ctx, name) // [ ] with global[goObjProxyHandler] = handler
+}
+
+func pushString(ctx *C.duk_context, s string) {
+	var cstr *C.char
+	var sLen C.int
+	getStrPtrLen(&s, &cstr, &sLen)
+	C.duk_push_lstring(ctx, cstr, C.size_t(sLen))
+}
+
+/*
+func lowerFirst(name string) string {
+	return strings.ToLower(name[:1]) + name[1:]
+}*/
+func upperFirst(name string) string {
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
