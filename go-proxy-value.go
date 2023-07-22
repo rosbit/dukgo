@@ -4,6 +4,7 @@ package djs
 // extern duk_ret_t go_obj_get(duk_context *ctx);
 // extern duk_ret_t go_obj_set(duk_context *ctx);
 // extern duk_ret_t go_obj_has(duk_context *ctx);
+// extern duk_ret_t freeTarket(duk_context *ctx);
 import "C"
 import (
 	elutils "github.com/rosbit/go-embedding-utils"
@@ -72,9 +73,9 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 	}
 }
 
-func getTargetValue(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (v interface{}, ok bool) {
+func getTargetIdx(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (idx int) {
 	// [ 0 ] target if no targetIdx
-	// ....
+	// ...
 	var tIdx C.duk_idx_t
 	if len(targetIdx) > 0 {
 		tIdx = targetIdx[0]
@@ -83,8 +84,15 @@ func getTargetValue(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (v interface{}
 	var name *C.char
 	getStrPtr(&idxName, &name)
 	C.duk_get_prop_string(ctx, tIdx, name) // [ ... idx ]
-	idx := int(C.duk_to_int(ctx, -1))
+	idx = int(C.duk_to_int(ctx, -1))
 	C.duk_pop(ctx) // [ ... ]
+	return
+}
+
+func getTargetValue(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (v interface{}, ok bool) {
+	// [ 0 ] target if no targetIdx
+	// ....
+	idx := getTargetIdx(ctx, targetIdx...)
 
 	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
 	vPtr, o := ptr.lookup(idx)
@@ -532,6 +540,16 @@ func getBoundProxyTarget(ctx *C.duk_context) (targetV interface{}, isProxy bool,
 	return
 }
 
+//export freeTarket
+func freeTarket(ctx *C.duk_context) C.duk_ret_t {
+	// Object being finalized is at stack index 0
+	// fmt.Printf("--- freeTarket is called\n")
+	idx := getTargetIdx(ctx)
+	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
+	ptr.remove(idx)
+	return 0
+}
+
 func makeProxyObject(ctx *C.duk_context, v interface{}) {
 	var name *C.char
 
@@ -541,6 +559,9 @@ func makeProxyObject(ctx *C.duk_context, v interface{}) {
 	C.duk_push_int(ctx, C.int(idx)) // [ target idx ]
 	getStrPtr(&idxName, &name)
 	C.duk_put_prop_string(ctx, -2, name)  // [ target ] with taget[name] = idx
+
+	C.duk_push_c_function(ctx, (*[0]byte)(C.freeTarket), 1); // [ target finalizer ]
+	C.duk_set_finalizer(ctx, -2); // [ target ] with finilizer = freeTarket
 
 	getStrPtr(&goObjProxyHandler, &name)
 	C.duk_get_global_string(ctx, name) // [ target handler ]

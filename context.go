@@ -43,10 +43,10 @@ func NewContext() (*JsContext, error) {
 }
 
 func freeJsContext(ctx *JsContext) {
-	// fmt.Printf("context freed\n")
 	c := ctx.c
-	delPtrStore((uintptr(unsafe.Pointer(c))))
 	C.duk_destroy_heap(c)
+	delPtrStore((uintptr(unsafe.Pointer(c))))
+	// fmt.Printf("context freed\n")
 }
 
 func loadPreludeModules(ctx *C.duk_context) {
