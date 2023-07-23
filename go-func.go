@@ -3,7 +3,7 @@ package djs
 /*
 #include "duktape.h"
 extern duk_ret_t goFuncBridge(duk_context *ctx);
-extern duk_ret_t freeTarket(duk_context *ctx);
+extern duk_ret_t freeTarget(duk_context *ctx);
 */
 import "C"
 import (
@@ -96,7 +96,7 @@ func pushWrappedGoFunc(ctx *C.duk_context, fnVar interface{}, fnType reflect.Typ
 	C.duk_push_uint(ctx, C.duk_uint_t(idx)) // [ ... goFuncBridge idx-of-fnVarPtr ]
 	C.duk_put_prop_string(ctx, -2, cNativeFunc) // [ ... goFuncBridge ] with goFuncBridge[idxName] = idx
 
-	C.duk_push_c_function(ctx, (*[0]byte)(C.freeTarket), 1); // [ target finalizer ]
-	C.duk_set_finalizer(ctx, -2); // [ target ] with finilizer = freeTarket
+	C.duk_push_c_function(ctx, (*[0]byte)(C.freeTarget), 1); // [ target finalizer ]
+	C.duk_set_finalizer(ctx, -2); // [ target ] with finilizer = freeTarget
 }
 

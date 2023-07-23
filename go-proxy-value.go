@@ -4,7 +4,7 @@ package djs
 // extern duk_ret_t go_obj_get(duk_context *ctx);
 // extern duk_ret_t go_obj_set(duk_context *ctx);
 // extern duk_ret_t go_obj_has(duk_context *ctx);
-// extern duk_ret_t freeTarket(duk_context *ctx);
+// extern duk_ret_t freeTarget(duk_context *ctx);
 import "C"
 import (
 	elutils "github.com/rosbit/go-embedding-utils"
@@ -540,10 +540,10 @@ func getBoundProxyTarget(ctx *C.duk_context) (targetV interface{}, isProxy bool,
 	return
 }
 
-//export freeTarket
-func freeTarket(ctx *C.duk_context) C.duk_ret_t {
+//export freeTarget
+func freeTarget(ctx *C.duk_context) C.duk_ret_t {
 	// Object being finalized is at stack index 0
-	// fmt.Printf("--- freeTarket is called\n")
+	// fmt.Printf("--- freeTarget is called\n")
 	idx := getTargetIdx(ctx)
 	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
 	ptr.remove(idx)
@@ -560,8 +560,8 @@ func makeProxyObject(ctx *C.duk_context, v interface{}) {
 	getStrPtr(&idxName, &name)
 	C.duk_put_prop_string(ctx, -2, name)  // [ target ] with taget[name] = idx
 
-	C.duk_push_c_function(ctx, (*[0]byte)(C.freeTarket), 1); // [ target finalizer ]
-	C.duk_set_finalizer(ctx, -2); // [ target ] with finilizer = freeTarket
+	C.duk_push_c_function(ctx, (*[0]byte)(C.freeTarget), 1); // [ target finalizer ]
+	C.duk_set_finalizer(ctx, -2); // [ target ] with finilizer = freeTarget
 
 	getStrPtr(&goObjProxyHandler, &name)
 	C.duk_get_global_string(ctx, name) // [ target handler ]
