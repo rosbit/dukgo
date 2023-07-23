@@ -76,7 +76,12 @@ func (s *ptrStore) register(i interface{}) uint32 {
 		return index
 	}
 
-	s.index++
+	for {
+		s.index++
+		if _, ok := s.id2ptr[s.index]; !ok {
+			break
+		}
+	}
 	s.id2ptr[s.index] = &ref{ptr:i, count:1}
 	s.ptr2id[i] = s.index
 	return s.index
@@ -97,9 +102,14 @@ func (s *ptrStore) remove(i uint32) {
 
 	if ref, ok := s.id2ptr[i]; ok {
 		ref.count -= 1
-		if ref.count <= 0 {
-			delete(s.id2ptr, i)
-			delete(s.ptr2id, ref.ptr)
+		if ref.count > 0 {
+			return
+		}
+
+		delete(s.id2ptr, i)
+		delete(s.ptr2id, ref.ptr)
+		if i <= s.index {
+			s.index = i - 1
 		}
 	}
 }
