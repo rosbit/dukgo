@@ -73,7 +73,7 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 	}
 }
 
-func getTargetIdx(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (idx int) {
+func getTargetIdx(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (idx uint32) {
 	// [ 0 ] target if no targetIdx
 	// ...
 	var tIdx C.duk_idx_t
@@ -84,7 +84,7 @@ func getTargetIdx(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (idx int) {
 	var name *C.char
 	getStrPtr(&idxName, &name)
 	C.duk_get_prop_string(ctx, tIdx, name) // [ ... idx ]
-	idx = int(C.duk_to_int(ctx, -1))
+	idx = uint32(C.duk_get_uint(ctx, -1))
 	C.duk_pop(ctx) // [ ... ]
 	return
 }
@@ -556,7 +556,7 @@ func makeProxyObject(ctx *C.duk_context, v interface{}) {
 	// [ target ]
 	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
 	idx := ptr.register(&v)
-	C.duk_push_int(ctx, C.int(idx)) // [ target idx ]
+	C.duk_push_uint(ctx, C.duk_uint_t(idx)) // [ target idx ]
 	getStrPtr(&idxName, &name)
 	C.duk_put_prop_string(ctx, -2, name)  // [ target ] with taget[name] = idx
 

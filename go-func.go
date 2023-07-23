@@ -3,16 +3,13 @@ package djs
 /*
 #include "duktape.h"
 extern duk_ret_t goFuncBridge(duk_context *ctx);
+extern duk_ret_t freeTarket(duk_context *ctx);
 */
 import "C"
 import (
 	elutils "github.com/rosbit/go-embedding-utils"
 	"reflect"
 	"unsafe"
-)
-
-var (
-	FUNC_NAME string = "\xFF_fn_\x00"
 )
 
 func pushGoFunc(ctx *C.duk_context, funcVar interface{}) {
@@ -24,14 +21,14 @@ func pushGoFunc(ctx *C.duk_context, funcVar interface{}) {
 //export goFuncBridge
 func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 	var cNativeFunc *C.char
-	getStrPtr(&FUNC_NAME, &cNativeFunc)
+	getStrPtr(&idxName, &cNativeFunc)
 
 	// get pointer of Golang function attached to goFuncBridge
 	// [ arg1 arg2 ... argN ]
 	argc := int(C.duk_get_top(ctx))
 	C.duk_push_current_function(ctx); // [ args ... goFuncBridge ]
 	C.duk_get_prop_string(ctx, -1, cNativeFunc) // [ args ... goFuncBridge idx-of-goFnPtr ]
-	idx := int(C.duk_get_int(ctx, -1))
+	idx := uint32(C.duk_get_uint(ctx, -1))
 	C.duk_pop_n(ctx, 2) // [ args ... ]
 
 	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
@@ -89,14 +86,17 @@ func pushWrappedGoFunc(ctx *C.duk_context, fnVar interface{}, fnType reflect.Typ
 	}
 
 	var cNativeFunc *C.char
-	getStrPtr(&FUNC_NAME, &cNativeFunc)
+	getStrPtr(&idxName, &cNativeFunc)
 
 	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
 	idx := ptr.register(&fnVar)
 
-	// [ ... funcName ]
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.goFuncBridge), nargs) // [ ... funcName goFuncBridge ]
-	C.duk_push_int(ctx, C.duk_int_t(idx)) // [ ... funcName goFuncBridge idx-of-fnVarPtr ]
-	C.duk_put_prop_string(ctx, -2, cNativeFunc) // [ ... funcName goFuncBridge ] with goFuncBridge[_fn_] = idx
+	// [ ... ]
+	C.duk_push_c_function(ctx, (C.duk_c_function)(C.goFuncBridge), nargs) // [ ... goFuncBridge ]
+	C.duk_push_uint(ctx, C.duk_uint_t(idx)) // [ ... goFuncBridge idx-of-fnVarPtr ]
+	C.duk_put_prop_string(ctx, -2, cNativeFunc) // [ ... goFuncBridge ] with goFuncBridge[idxName] = idx
+
+	C.duk_push_c_function(ctx, (*[0]byte)(C.freeTarket), 1); // [ target finalizer ]
+	C.duk_set_finalizer(ctx, -2); // [ target ] with finilizer = freeTarket
 }
 

@@ -52,21 +52,21 @@ type (
 	}
 	ptrStore struct {
 		lock *sync.Mutex
-		index int
-		id2ptr map[int]*ref
-		ptr2id map[interface{}]int
+		index uint32
+		id2ptr map[uint32]*ref
+		ptr2id map[interface{}]uint32
 	}
 )
 
 func newPtrStore() *ptrStore {
 	return &ptrStore{
 		lock: &sync.Mutex{},
-		id2ptr: make(map[int]*ref),
-		ptr2id: make(map[interface{}]int),
+		id2ptr: make(map[uint32]*ref),
+		ptr2id: make(map[interface{}]uint32),
 	}
 }
 
-func (s *ptrStore) register(i interface{}) int {
+func (s *ptrStore) register(i interface{}) uint32 {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -82,7 +82,7 @@ func (s *ptrStore) register(i interface{}) int {
 	return s.index
 }
 
-func (s *ptrStore) lookup(i int) (ptr interface{}, ok bool) {
+func (s *ptrStore) lookup(i uint32) (ptr interface{}, ok bool) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if ref, ok1 := s.id2ptr[i]; ok1 {
@@ -91,7 +91,7 @@ func (s *ptrStore) lookup(i int) (ptr interface{}, ok bool) {
 	return
 }
 
-func (s *ptrStore) remove(i int) {
+func (s *ptrStore) remove(i uint32) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
