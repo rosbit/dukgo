@@ -1,4 +1,4 @@
-# go-duktape, makes duktape be embedded easily
+# dukgo, makes duktape be embedded easily
 
 [Duktape](http://duktape.org/index.html) is a thin, embeddable javascript engine.
 Its [api](http://duktape.org/api.html) is very well documented. For most of developers
@@ -7,16 +7,16 @@ duk\_pop() to make use of the power of Duktape. Though there are some binding
 implementations of Duktape for languages other than C, most of them inherit the
 methods of using API of Duktape.
 
-`go-duktape` is a package wrapping Duktape and making it a **pragmatic embeddable** language.
-With some helper functions provided by `go-duktape`, calling Golang functions from Javascript, 
-or calling Javascript functions from Golang are both very simple. So, with the help of `go-duktape`, Duktape
+`dukgo` is a package wrapping Duktape and making it a **pragmatic embeddable** language.
+With some helper functions provided by `dukgo`, calling Golang functions from Javascript, 
+or calling Javascript functions from Golang are both very simple. So, with the help of `dukgo`, Duktape
 can be embedded in Golang application easily.
 
 ### Install
 
 The package is fully go-getable, So, just type
 
-  `go get github.com/rosbit/go-duktape`
+  `go get github.com/rosbit/dukgo`
 
 to install.
 
@@ -28,7 +28,7 @@ to install.
 package main
 
 import (
-  djs "github.com/rosbit/go-duktape"
+  djs "github.com/rosbit/dukgo"
   "fmt"
 )
 
@@ -63,7 +63,7 @@ one can call the Javascript function `add()` in Go code like the following:
 package main
 
 import (
-  djs "github.com/rosbit/go-duktape"
+  djs "github.com/rosbit/dukgo"
   "fmt"
 )
 
@@ -107,7 +107,7 @@ make Golang functions as Javascript global functions. There's the example:
 ```go
 package main
 
-import "github.com/rosbit/go-duktape"
+import "github.com/rosbit/dukgo"
 
 // function to be called by Javascript
 func adder(a1 float64, a2 float64) float64 {

@@ -1,4 +1,4 @@
-module github.com/rosbit/go-duktape
+module github.com/rosbit/dukgo
 
 go 1.20
 
