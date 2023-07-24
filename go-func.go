@@ -48,7 +48,7 @@ func goFuncBridge(ctx *C.duk_context) C.duk_ret_t {
 	fnType := fnVal.Type()
 
 	// make args for Golang function
-	helper := elutils.NewGolangFuncHelperDiretly(fnVal, fnType)
+	helper := elutils.NewGolangFuncHelperDirectly(fnVal, fnType)
 	getArgs := func(i int) interface{} {
 		C.duk_push_null(ctx)  // [ args ... null ] 
 		C.duk_copy(ctx, C.duk_idx_t(i - argc - 1), -1) // [ args ... argI ]
