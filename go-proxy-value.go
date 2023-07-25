@@ -4,6 +4,8 @@ package djs
 // extern duk_ret_t go_obj_get(duk_context *ctx);
 // extern duk_ret_t go_obj_set(duk_context *ctx);
 // extern duk_ret_t go_obj_has(duk_context *ctx);
+// extern duk_ret_t go_func_apply(duk_context *ctx);
+// extern duk_ret_t goDummyFunc(duk_context *ctx);
 // extern duk_ret_t freeTarget(duk_context *ctx);
 import "C"
 import (
@@ -50,16 +52,16 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 		fallthrough
 	case reflect.Array:
 		C.duk_push_bare_array(ctx)
-		makeProxyObject(ctx, v)
+		makeProxyObject(ctx, v, goObjProxyHandler)
 		return
 	case reflect.Map, reflect.Struct:
 		C.duk_push_bare_object(ctx)
-		makeProxyObject(ctx, v)
+		makeProxyObject(ctx, v, goObjProxyHandler)
 		return
 	case reflect.Ptr:
 		if vv.Elem().Kind() == reflect.Struct {
 			C.duk_push_bare_object(ctx)
-			makeProxyObject(ctx, v)
+			makeProxyObject(ctx, v, goObjProxyHandler)
 			return
 		}
 		pushJsProxyValue(ctx, vv.Elem().Interface())
@@ -508,6 +510,60 @@ func go_obj_has(ctx *C.duk_context) C.duk_ret_t {
 	}
 }
 
+//export goDummyFunc
+func goDummyFunc(ctx *C.duk_context) C.duk_ret_t {
+	return 0
+}
+
+//export go_func_apply
+func go_func_apply(ctx *C.duk_context) C.duk_ret_t {
+	// 'this' binding: handler
+	// [0]: target
+	// [1]: receiver
+	// [2]: args-array
+	fn, ok := getTargetValue(ctx)
+	if !ok {
+		return C.DUK_RET_ERROR
+	}
+	if fn == nil {
+		return C.DUK_RET_ERROR
+	}
+	fnVal := reflect.ValueOf(fn)
+	if fnVal.Kind() != reflect.Func {
+		return C.DUK_RET_ERROR
+	}
+	fnType := fnVal.Type()
+
+	// make args for Golang function
+	argc := int(C.duk_get_length(ctx, 2))
+	helper := elutils.NewGolangFuncHelperDirectly(fnVal, fnType)
+	getArgs := func(i int) interface{} {
+		C.duk_get_prop_index(ctx, 2, C.duk_uarridx_t(i)) // [ ... i-th arg ]
+		defer C.duk_pop(ctx) // [ ... ]
+
+		if goVal, err := fromJsValue(ctx); err == nil {
+			return goVal
+		}
+		return nil
+	}
+	v, e := helper.CallGolangFunc(argc, "djs-func", getArgs) // call Golang function
+
+	// convert result (in var v) of Golang function to that of JS.
+	// 1. error
+	if e != nil {
+		return C.DUK_RET_ERROR
+	}
+
+	// 2. no result
+	if v == nil {
+		return 0 // undefined
+	}
+
+	// 3. array or scalar
+	pushJsProxyValue(ctx, v) // [ args ... v ]
+	return 1
+}
+
 func bindProxyTarget(ctx *C.duk_context) {
 	var name *C.char
 
@@ -550,7 +606,7 @@ func freeTarget(ctx *C.duk_context) C.duk_ret_t {
 	return 0
 }
 
-func makeProxyObject(ctx *C.duk_context, v interface{}) {
+func makeProxyObject(ctx *C.duk_context, v interface{}, proxyHandlerName string) {
 	var name *C.char
 
 	// [ target ]
@@ -563,31 +619,55 @@ func makeProxyObject(ctx *C.duk_context, v interface{}) {
 	C.duk_push_c_function(ctx, (*[0]byte)(C.freeTarget), 1); // [ target finalizer ]
 	C.duk_set_finalizer(ctx, -2); // [ target ] with finilizer = freeTarget
 
-	getStrPtr(&goObjProxyHandler, &name)
+	getStrPtr(&proxyHandlerName, &name)
 	C.duk_get_global_string(ctx, name) // [ target handler ]
 
 	bindProxyTarget(ctx) // [ Proxy(target,handler) ]
 }
 
-func registerGoObjProxyHandler(ctx *C.duk_context) {
+func pushGoFunc(ctx *C.duk_context, fnVar interface{}) {
+	fnType := reflect.TypeOf(fnVar)
+	argc := fnType.NumIn()
+	nargs := C.int(C.DUK_VARARGS)
+	if !fnType.IsVariadic() {
+		nargs = C.int(argc)
+	}
+	C.duk_push_c_function(ctx, (C.duk_c_function)(C.goDummyFunc), nargs) // [ target ] goDummyFunc as target
+	makeProxyObject(ctx, fnVar, goFuncProxyHandler)
+}
+
+type trapFunc struct {
+	name string
+	fn C.duk_c_function
+	nargs C.duk_idx_t
+}
+func registerProxyHandler(ctx *C.duk_context, proxyHandlerName string, trapFuncs ...*trapFunc) {
 	var name *C.char
 
-	C.duk_push_object(ctx)  // [ handler ]
+	C.duk_push_bare_object(ctx)  // [ handler ]
 
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_obj_get), 3) // [ handler getter ]
-	getStrPtr(&get, &name)
-	C.duk_put_prop_string(ctx, -2, name)  // [ handler ] with handler[get] = getter
+	for _, trap := range trapFuncs {
+		C.duk_push_c_function(ctx, trap.fn, trap.nargs) // [ handler trap-func ]
+		getStrPtr(&trap.name, &name)
+		C.duk_put_prop_string(ctx, -2, name) // [ handler ] with handler[trap-name] = trap-func
+	}
 
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_obj_set), 4) // [ handler setter ]
-	getStrPtr(&set, &name)
-	C.duk_put_prop_string(ctx, -2, name)  // [ handler ] with handler[set] = setter
+	getStrPtr(&proxyHandlerName, &name)
+	C.duk_put_global_string(ctx, name) // [ ] with global[proxyHandlerName] = handler
+}
 
-	C.duk_push_c_function(ctx, (C.duk_c_function)(C.go_obj_has), 2) // [ handler has-handler ]
-	getStrPtr(&has, &name)
-	C.duk_put_prop_string(ctx, -2, name) // [ handler ] with handler[has] = has-handler
+func registerGoProxyHandlers(ctx *C.duk_context) {
+	registerProxyHandler(ctx, goObjProxyHandler, &trapFunc{
+		name: get, fn: (C.duk_c_function)(C.go_obj_get), nargs: 3,
+	}, &trapFunc{
+		name: set, fn: (C.duk_c_function)(C.go_obj_set), nargs: 4,
+	}, &trapFunc{
+		name: has, fn: (C.duk_c_function)(C.go_obj_has), nargs: 2,
+	})
 
-	getStrPtr(&goObjProxyHandler, &name)
-	C.duk_put_global_string(ctx, name) // [ ] with global[goObjProxyHandler] = handler
+	registerProxyHandler(ctx, goFuncProxyHandler, &trapFunc{
+		name: apply, fn: (C.duk_c_function)(C.go_func_apply), nargs: 3,
+	})
 }
 
 func pushString(ctx *C.duk_context, s string) {

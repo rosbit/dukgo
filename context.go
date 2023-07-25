@@ -54,7 +54,7 @@ func loadPreludeModules(ctx *C.duk_context) {
 	C.duk_console_init(ctx, 0)
 	C.duk_module_duktape_init(ctx)
 	setModSearch(ctx)
-	registerGoObjProxyHandler(ctx)
+	registerGoProxyHandlers(ctx)
 }
 
 func (ctx *JsContext) Eval(script string, env map[string]interface{}) (res interface{}, err error) {
