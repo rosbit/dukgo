@@ -85,10 +85,16 @@ func fromJsArr(ctx *C.duk_context) (goVal interface{}, err error) {
 	res := make([]interface{}, length)
 	for i:=0; i<length; i++ {
 		C.duk_get_prop_index(ctx, -1, C.duk_uarridx_t(i)) // [ ... arr i-th-value ]
-		if res[i], err = fromJsValue(ctx); err != nil {
-			C.duk_pop(ctx) // [ ... arr ]
+		val, e := fromJsValue(ctx)
+		if e != nil {
+			err = e
+			C.duk_pop(ctx)
 			return
 		}
+		if _, ok := val.(string); ok {
+			val = fmt.Sprintf("%s", val) // deep copy
+		}
+		res[i] = val
 		C.duk_pop(ctx) // [ ... arr ]
 	}
 	goVal = res
@@ -124,6 +130,9 @@ func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
 			err = e
 			C.duk_pop_n(ctx, 3) // [ ... obj ]
 			return
+		}
+		if _, ok := val.(string); ok {
+			val = fmt.Sprintf("%s", val) // deep copy
 		}
 		res[key] = val
 		C.duk_pop_n(ctx, 2) // [ ... obj enum ]
