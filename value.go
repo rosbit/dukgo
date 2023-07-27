@@ -30,31 +30,25 @@ func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
 		goVal = toBytes(b, int(length))
 		return
 	case C.DUK_TYPE_OBJECT:
-		if C.duk_is_function(ctx, -1) != 0 {
-			/*
-			C.duk_push_null(ctx);   // [ ... null ]
-			C.duk_copy(ctx, -2, -1); // [ ... func ]
-			createJsFunc
-			*/
-			//TODO
-			err = fmt.Errorf("under implementation")
+		switch {
+		case C.duk_is_function(ctx, -1) != 0:
+			goVal = fromJsFunc(ctx)
 			return
-		}
-		if C.duk_is_buffer_data(ctx, -1) != 0 {
+		case C.duk_is_buffer_data(ctx, -1) != 0:
 			b := (*C.char)(C.duk_get_buffer_data(ctx, -1, &length))
 			goVal = toBytes(b, int(length))
 			return
-		}
-		if C.duk_get_error_code(ctx, -1) != 0 {
+		case C.duk_get_error_code(ctx, -1) != 0:
 			s := C.duk_safe_to_lstring(ctx, -1, &length)
 			err = fmt.Errorf(*(toString(s, int(length))))
 			return
-		}
-
-		if C.duk_is_array(ctx, -1) != 0 {
+		case C.duk_is_array(ctx, -1) != 0:
 			// array
 			return fromJsArr(ctx)
-		} else {
+		case C.duk_is_c_function(ctx, -1) != 0:
+			// c function
+			return fromCFunc(ctx)
+		default:
 			// object
 			return fromJsObj(ctx)
 		}
@@ -142,3 +136,17 @@ func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
 	return
 }
 
+func fromCFunc(ctx *C.duk_context) (goVal interface{}, err error) {
+	// [ ... c-function ]
+	v, isProxy, e := getBoundProxyTarget(ctx)
+	if e != nil {
+		err = e
+		return
+	}
+	if isProxy {
+		goVal = v
+		return
+	}
+	err = fmt.Errorf("cannot process such c-function")
+	return
+}
