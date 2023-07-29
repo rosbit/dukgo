@@ -54,7 +54,7 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 		C.duk_push_bare_array(ctx)
 		makeProxyObject(ctx, v, goObjProxyHandler)
 		return
-	case reflect.Map, reflect.Struct:
+	case reflect.Map, reflect.Struct, reflect.Interface:
 		C.duk_push_bare_object(ctx)
 		makeProxyObject(ctx, v, goObjProxyHandler)
 		return
@@ -424,6 +424,27 @@ func go_struct_has(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
 	return 1
 }
 
+func go_interface_get(ctx *C.duk_context, vv reflect.Value) C.duk_ret_t {
+	/* 'this' binding: handler
+	 * [0]: target
+	 * [1]: key
+	 * [2]: receiver (proxy)
+	 */
+	if C.duk_is_string(ctx, 1) == 0 {
+		C.duk_push_undefined(ctx)
+		return 1
+	}
+	key := C.GoString(C.duk_get_string(ctx, 1))
+	name := upperFirst(key)
+	fv := vv.MethodByName(name)
+	if !fv.IsValid() || !fv.CanInterface() {
+		C.duk_push_undefined(ctx)
+		return 1
+	}
+	pushGoFunc(ctx, fv.Interface())
+	return 1
+}
+
 //export go_obj_get
 func go_obj_get(ctx *C.duk_context) C.duk_ret_t {
 	/* 'this' binding: handler
@@ -447,6 +468,8 @@ func go_obj_get(ctx *C.duk_context) C.duk_ret_t {
 		return go_map_get(ctx, vv)
 	case reflect.Struct, reflect.Ptr:
 		return go_struct_get(ctx, vv)
+	case reflect.Interface:
+		return go_interface_get(ctx, vv)
 	default:
 		C.duk_push_undefined(ctx)
 		return 1

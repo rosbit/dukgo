@@ -104,10 +104,8 @@ func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
 	}
 	if isProxy {
 		switch vv := reflect.ValueOf(v); vv.Kind() {
-		case reflect.Map, reflect.Struct:
+		case reflect.Map, reflect.Struct, reflect.Ptr, reflect.Interface:
 			goVal = v
-		case reflect.Ptr:
-			goVal = vv.Elem().Interface()
 		default:
 			err = fmt.Errorf("unknown type")
 		}
