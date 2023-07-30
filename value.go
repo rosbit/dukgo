@@ -4,7 +4,6 @@ package djs
 // static const char *getCString(duk_context *ctx, duk_idx_t idx);
 import "C"
 import (
-	"reflect"
 	"unsafe"
 	"fmt"
 )
@@ -65,7 +64,7 @@ func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
 func fromJsArr(ctx *C.duk_context) (goVal interface{}, err error) {
 	// [ ... arr ]
 	var isProxy bool
-	if goVal, isProxy, err = getBoundProxyTarget(ctx); err != nil || isProxy {
+	if goVal, isProxy = getTargetValue(ctx, -1); isProxy {
 		return
 	}
 
@@ -97,18 +96,8 @@ func fromJsArr(ctx *C.duk_context) (goVal interface{}, err error) {
 
 func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
 	// [ ... obj ]
-	v, isProxy, e := getBoundProxyTarget(ctx)
-	if e != nil {
-		err = e
-		return
-	}
-	if isProxy {
-		switch vv := reflect.ValueOf(v); vv.Kind() {
-		case reflect.Map, reflect.Struct, reflect.Ptr, reflect.Interface:
-			goVal = v
-		default:
-			err = fmt.Errorf("unknown type")
-		}
+	var isProxy bool
+	if goVal, isProxy = getTargetValue(ctx, -1); isProxy {
 		return
 	}
 
@@ -136,13 +125,8 @@ func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
 
 func fromCFunc(ctx *C.duk_context) (goVal interface{}, err error) {
 	// [ ... c-function ]
-	v, isProxy, e := getBoundProxyTarget(ctx)
-	if e != nil {
-		err = e
-		return
-	}
-	if isProxy {
-		goVal = v
+	var isProxy bool
+	if goVal, isProxy = getTargetValue(ctx, -1); isProxy {
 		return
 	}
 	err = fmt.Errorf("cannot process such c-function")

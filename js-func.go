@@ -67,10 +67,11 @@ func callFunc(ctx *C.duk_context, args ...interface{}) {
 func freeJsFunc(ctx *C.duk_context) C.duk_ret_t {
 	// [0] function
 	// [1] ...
-	idx := getTargetIdx(ctx)
-	C.duk_push_global_stash(ctx)            // [ ... stash ]
-	C.duk_del_prop_index(ctx, -1, C.duk_uarridx_t(idx)) // [ ... stash ]
-	C.duk_pop(ctx)                          // [ ... ]
+	if idx, isProxy := getTargetIdx(ctx); isProxy {
+		C.duk_push_global_stash(ctx)            // [ ... stash ]
+		C.duk_del_prop_index(ctx, -1, C.duk_uarridx_t(idx)) // [ ... stash ]
+		C.duk_pop(ctx)                          // [ ... ]
+	}
 	return 0
 }
 

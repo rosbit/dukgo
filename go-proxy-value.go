@@ -51,17 +51,14 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 		}
 		fallthrough
 	case reflect.Array:
-		C.duk_push_bare_array(ctx)
-		makeProxyObject(ctx, v, goObjProxyHandler)
+		pushGoArray(ctx, v)
 		return
 	case reflect.Map, reflect.Struct, reflect.Interface:
-		C.duk_push_bare_object(ctx)
-		makeProxyObject(ctx, v, goObjProxyHandler)
+		pushGoObj(ctx, v)
 		return
 	case reflect.Ptr:
 		if vv.Elem().Kind() == reflect.Struct {
-			C.duk_push_bare_object(ctx)
-			makeProxyObject(ctx, v, goObjProxyHandler)
+			pushGoObj(ctx, v)
 			return
 		}
 		pushJsProxyValue(ctx, vv.Elem().Interface())
@@ -75,7 +72,7 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 	}
 }
 
-func getTargetIdx(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (idx uint32) {
+func getTargetIdx(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (idx uint32, isProxy bool) {
 	// [ 0 ] target if no targetIdx
 	// ...
 	var tIdx C.duk_idx_t
@@ -85,25 +82,30 @@ func getTargetIdx(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (idx uint32) {
 
 	var name *C.char
 	getStrPtr(&idxName, &name)
-	C.duk_get_prop_string(ctx, tIdx, name) // [ ... idx ]
-	idx = uint32(C.duk_get_uint(ctx, -1))
+	isProxy = C.duk_get_prop_string(ctx, tIdx, name) != 0 // [ ... idx/undefined ]
+	if isProxy {
+		idx = uint32(C.duk_get_uint(ctx, -1))
+	}
 	C.duk_pop(ctx) // [ ... ]
 	return
 }
 
-func getTargetValue(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (v interface{}, ok bool) {
+func getTargetValue(ctx *C.duk_context, targetIdx ...C.duk_idx_t) (v interface{}, isProxy bool) {
 	// [ 0 ] target if no targetIdx
 	// ....
-	idx := getTargetIdx(ctx, targetIdx...)
+	var idx uint32
+	if idx, isProxy = getTargetIdx(ctx, targetIdx...); !isProxy {
+		return
+	}
 
 	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
 	vPtr, o := ptr.lookup(idx)
 	if !o {
+		isProxy = false
 		return
 	}
 	if vv, o := vPtr.(*interface{}); o {
 		v = *vv
-		ok = true
 	}
 	return
 }
@@ -452,8 +454,8 @@ func go_obj_get(ctx *C.duk_context) C.duk_ret_t {
 	 * [1]: key
 	 * [2]: receiver (proxy)
 	 */
-	v, ok := getTargetValue(ctx)
-	if !ok {
+	v, isProxy := getTargetValue(ctx)
+	if !isProxy {
 		C.duk_push_undefined(ctx)
 		return 1
 	}
@@ -484,8 +486,8 @@ func go_obj_set(ctx *C.duk_context) C.duk_ret_t {
 	 * [2]: val
 	 * [3]: receiver (proxy)
 	 */
-	v, ok := getTargetValue(ctx)
-	if !ok {
+	v, isProxy := getTargetValue(ctx)
+	if !isProxy {
 		C.duk_push_false(ctx)
 		return 1
 	}
@@ -511,8 +513,8 @@ func go_obj_has(ctx *C.duk_context) C.duk_ret_t {
 	// 'this' binding: handler
 	// [0]: target
 	// [1]: key
-	v, ok := getTargetValue(ctx)
-	if !ok {
+	v, isProxy := getTargetValue(ctx)
+	if !isProxy {
 		C.duk_push_false(ctx)
 		return 1
 	}
@@ -544,8 +546,8 @@ func go_func_apply(ctx *C.duk_context) C.duk_ret_t {
 	// [0]: target
 	// [1]: receiver
 	// [2]: args-array
-	fn, ok := getTargetValue(ctx)
-	if !ok {
+	fn, isProxy := getTargetValue(ctx)
+	if !isProxy {
 		return C.DUK_RET_ERROR
 	}
 	if fn == nil {
@@ -587,45 +589,14 @@ func go_func_apply(ctx *C.duk_context) C.duk_ret_t {
 	return 1
 }
 
-func bindProxyTarget(ctx *C.duk_context) {
-	var name *C.char
-
-	// [ target handler ]
-	C.duk_dup(ctx, -2)       // [ target handler copied-target ]
-	C.duk_swap(ctx, -2, -1)  // [ target copied-target handler ]
-	C.duk_push_proxy(ctx, 0) // [ target proxy(target,handler) ]
-
-	C.duk_swap(ctx, -2, -1)  // [ proxy handler ]
-	getStrPtr(&target, &name)
-	C.duk_put_prop_string(ctx, -2, name) // [ proxy ] with proxy["target"] = target
-}
-
-func getBoundProxyTarget(ctx *C.duk_context) (targetV interface{}, isProxy bool, err error) {
-	var name *C.char
-
-	// [ proxy ]
-	getStrPtr(&target, &name)
-	isProxy = C.duk_get_prop_string(ctx, -1, name) != 0 // [ proxy target/undefined ]
-	defer C.duk_pop(ctx) // [ proxy ] target/undefned poped
-
-	if isProxy {
-		v, ok := getTargetValue(ctx, -1)
-		if !ok {
-			err = fmt.Errorf("no target found")
-			return
-		}
-		targetV = v
-	}
-	return
-}
-
 //export freeTarget
 func freeTarget(ctx *C.duk_context) C.duk_ret_t {
 	// Object being finalized is at stack index 0
-	// fmt.Printf("--- freeTarget is called\n")
-	idx := getTargetIdx(ctx)
-	ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
-	ptr.remove(idx)
+	if idx, isProxy := getTargetIdx(ctx); isProxy {
+		// fmt.Printf("--- freeTarget is called\n")
+		ptr := getPtrStore(uintptr(unsafe.Pointer(ctx)))
+		ptr.remove(idx)
+	}
 	return 0
 }
 
@@ -645,7 +616,17 @@ func makeProxyObject(ctx *C.duk_context, v interface{}, proxyHandlerName string)
 	getStrPtr(&proxyHandlerName, &name)
 	C.duk_get_global_string(ctx, name) // [ target handler ]
 
-	bindProxyTarget(ctx) // [ Proxy(target,handler) ]
+	C.duk_push_proxy(ctx, 0) // [ Proxy(target,handler) ]
+}
+
+func pushGoArray(ctx *C.duk_context, v interface{}) {
+	C.duk_push_bare_array(ctx)
+	makeProxyObject(ctx, v, goObjProxyHandler)
+}
+
+func pushGoObj(ctx *C.duk_context, v interface{}) {
+	C.duk_push_bare_object(ctx)
+	makeProxyObject(ctx, v, goObjProxyHandler)
 }
 
 func pushGoFunc(ctx *C.duk_context, fnVar interface{}) {
@@ -700,10 +681,6 @@ func pushString(ctx *C.duk_context, s string) {
 	C.duk_push_lstring(ctx, cstr, C.size_t(sLen))
 }
 
-/*
-func lowerFirst(name string) string {
-	return strings.ToLower(name[:1]) + name[1:]
-}*/
 func upperFirst(name string) string {
 	return strings.ToUpper(name[:1]) + name[1:]
 }
