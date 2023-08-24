@@ -12,6 +12,7 @@ import (
 	elutils "github.com/rosbit/go-embedding-utils"
 	"reflect"
 	"unsafe"
+	"math"
 	"fmt"
 	"strings"
 )
@@ -38,7 +39,12 @@ func pushJsProxyValue(ctx *C.duk_context, v interface{}) {
 		C.duk_push_number(ctx, C.duk_double_t(vv.Uint()))
 		return
 	case reflect.Float32, reflect.Float64:
-		C.duk_push_number(ctx, C.duk_double_t(vv.Float()))
+		fv := vv.Float()
+		if math.IsNaN(fv) {
+			C.duk_push_nan(ctx)
+			return
+		}
+		C.duk_push_number(ctx, C.duk_double_t(fv))
 		return
 	case reflect.String:
 		pushString(ctx, v.(string))

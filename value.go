@@ -6,6 +6,7 @@ import "C"
 import (
 	"unsafe"
 	"fmt"
+	"math"
 )
 
 func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
@@ -18,6 +19,10 @@ func fromJsValue(ctx *C.duk_context) (goVal interface{}, err error) {
 		goVal = uint32(C.duk_get_boolean(ctx, -1)) != 0
 		return
 	case C.DUK_TYPE_NUMBER:
+		if C.duk_is_nan(ctx, -1) != 0 {
+			goVal = math.NaN()
+			return
+		}
 		goVal = float64(C.duk_get_number(ctx, -1))
 		return
 	case C.DUK_TYPE_STRING:
