@@ -51,7 +51,7 @@ func freeJsContext(ctx *JsContext) {
 
 func loadPreludeModules(ctx *C.duk_context) {
 	C.duk_print_alert_init(ctx, 0)
-	C.duk_console_init(ctx, 0)
+	C.duk_console_init(ctx, C.duk_uint_t(C.DUK_CONSOLE_STDERR_ONLY|C.DUK_CONSOLE_FLUSH))
 	C.duk_module_duktape_init(ctx)
 	setModSearch(ctx)
 	registerGoProxyHandlers(ctx)
