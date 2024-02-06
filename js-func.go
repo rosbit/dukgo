@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func bindFunc(ctx *C.duk_context, funcName string, funcVarPtr interface{}) (err error) {
+func bindFunc(ctx *JsContext, funcName string, funcVarPtr interface{}) (err error) {
 	helper, e := elutils.NewEmbeddingFuncHelper(funcVarPtr)
 	if e != nil {
 		err = e
@@ -19,13 +19,17 @@ func bindFunc(ctx *C.duk_context, funcName string, funcVarPtr interface{}) (err 
 	return
 }
 
-func wrapFunc(ctx *C.duk_context, funcName string, helper *elutils.EmbeddingFuncHelper) elutils.FnGoFunc {
+func wrapFunc(ctx *JsContext, funcName string, helper *elutils.EmbeddingFuncHelper) elutils.FnGoFunc {
 	return func(args []reflect.Value) (results []reflect.Value) {
-		// reload the function when calling go-function
-		C.duk_push_global_object(ctx) // [ global ]
-		getVar(ctx, funcName) // [ global function ]
+		ctx.mu.Lock()
+		defer ctx.mu.Unlock()
 
-		return callJsFuncFromGo(ctx, helper, args)
+		c := ctx.c
+		// reload the function when calling go-function
+		C.duk_push_global_object(c) // [ global ]
+		getVar(c, funcName) // [ global function ]
+
+		return callJsFuncFromGo(c, helper, args)
 	}
 }
 

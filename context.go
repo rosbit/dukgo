@@ -22,21 +22,64 @@ import (
 	"unsafe"
 	"fmt"
 	"os"
+	"sync"
 	"runtime"
 )
 
-type JsContext struct {
-	c *C.duk_context
+var (
+	globalHeap *C.duk_context
+	globalMu = &sync.Mutex{}
+)
+
+func init() {
+	globalHeap = C.createContext()
+	if globalHeap == nil {
+		panic("failed to init duktape heap")
+	}
+	loadPreludeModules(globalHeap)
 }
 
-func NewContext() (*JsContext, error) {
-	ctx := C.createContext()
+/*
+func DestroyJsHeap() {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	if globalHeap != nil {
+		C.duk_destroy_heap(globalHeap)
+		globalHeap = nil
+	}
+}*/
+
+type JsContext struct {
+	c *C.duk_context
+	mu *sync.Mutex
+	withGlobalHeap bool
+}
+
+func NewContext(withoutGlobalHeap ...bool) (*JsContext, error) {
+	var ctx *C.duk_context
+
+	withGlobalHeap := !(len(withoutGlobalHeap) > 0 && withoutGlobalHeap[0])
+	if withGlobalHeap {
+		globalMu.Lock()
+		defer globalMu.Unlock()
+		C.duk_push_thread_raw(globalHeap, 0)
+		ctx = C.duk_get_context(globalHeap, -1)
+	} else {
+		ctx = C.createContext()
+	}
 	if ctx == (*C.duk_context)(unsafe.Pointer(nil)) {
 		return nil, fmt.Errorf("failed to create context")
 	}
-	loadPreludeModules(ctx)
+
+	if !withGlobalHeap {
+		loadPreludeModules(ctx)
+	}
+	registerGoProxyHandlers(ctx)
 	c := &JsContext {
 		c: ctx,
+		mu: &sync.Mutex{},
+		withGlobalHeap: withGlobalHeap,
 	}
 	runtime.SetFinalizer(c, freeJsContext)
 	return c, nil
@@ -44,9 +87,11 @@ func NewContext() (*JsContext, error) {
 
 func freeJsContext(ctx *JsContext) {
 	c := ctx.c
-	C.duk_destroy_heap(c)
+	if (!ctx.withGlobalHeap) {
+		C.duk_destroy_heap(c)
+	}
 	delPtrStore((uintptr(unsafe.Pointer(c))))
-	// fmt.Printf("context freed\n")
+	fmt.Printf("context freed\n")
 }
 
 func loadPreludeModules(ctx *C.duk_context) {
@@ -54,7 +99,6 @@ func loadPreludeModules(ctx *C.duk_context) {
 	C.duk_console_init(ctx, C.duk_uint_t(C.DUK_CONSOLE_STDERR_ONLY|C.DUK_CONSOLE_FLUSH))
 	C.duk_module_duktape_init(ctx)
 	setModSearch(ctx)
-	registerGoProxyHandlers(ctx)
 }
 
 func (ctx *JsContext) Eval(script string, env map[string]interface{}) (res interface{}, err error) {
@@ -78,6 +122,9 @@ func (ctx *JsContext) EvalFile(scriptFile string, env map[string]interface{}) (r
 }
 
 func (ctx *JsContext) eval(script *C.char, scriptLen C.int, env map[string]interface{}) (res interface{}, err error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
 	c := ctx.c
 	setEnv(c, env)
 
@@ -122,6 +169,9 @@ func getVar(ctx *C.duk_context, name string) (exsiting bool) {
 }
 
 func (ctx *JsContext) GetGlobal(name string) (res interface{}, err error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
 	c := ctx.c
 	C.duk_push_global_object(c) // [ global ]
 	defer C.duk_pop_n(c, 2) // [ ]
@@ -134,7 +184,11 @@ func (ctx *JsContext) GetGlobal(name string) (res interface{}, err error) {
 }
 
 func (ctx *JsContext) CallFunc(funcName string, args ...interface{}) (res interface{}, err error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
 	c := ctx.c
+
 	C.duk_push_global_object(c) // [ global ]
 	defer C.duk_pop_n(c, 2) // [ ]
 
@@ -166,6 +220,9 @@ func (ctx *JsContext) BindFunc(funcName string, funcVarPtr interface{}) (err err
 		return
 	}
 
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
 	c := ctx.c
 
 	C.duk_push_global_object(c) // [ global ]
@@ -182,7 +239,7 @@ func (ctx *JsContext) BindFunc(funcName string, funcVarPtr interface{}) (err err
 	}
 
 	C.duk_pop_n(c, 2) // [ ] function will be restored when calling
-	return bindFunc(c, funcName, funcVarPtr)
+	return bindFunc(ctx, funcName, funcVarPtr)
 }
 
 func (ctx *JsContext) BindFuncs(funcName2FuncVarPtr map[string]interface{}) (err error) {
