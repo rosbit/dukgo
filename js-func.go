@@ -6,6 +6,8 @@ import "C"
 import (
 	elutils "github.com/rosbit/go-embedding-utils"
 	"reflect"
+	"fmt"
+	"os"
 	"time"
 )
 
@@ -47,7 +49,10 @@ func callJsFuncFromGo(ctx *C.duk_context, helper *elutils.EmbeddingFuncHelper, a
 	// [ some-obj function arg1 arg2 ... argN ]
 
 	// call JS function
-	C.duk_call(ctx, C.int(argc)) // [ some-obj retval ]
+	if rc := C.duk_pcall(ctx, C.int(argc)); rc != 0 { // [ some-obj retval/err ]
+		// [ some-obj err ]
+		printStackTrace(ctx)
+	}
 
 	// convert result to golang
 	goVal, err := fromJsValue(ctx)
@@ -64,7 +69,22 @@ func callFunc(ctx *C.duk_context, args ...interface{}) {
 	}
 	// [ obj function arg1 arg2 ... argN ]
 
-	C.duk_call(ctx, C.int(n)) // [ obj retval ]
+	if rc := C.duk_pcall(ctx, C.int(n)); rc != 0 { // [ obj retval/err ]
+		// [ some-obj err ]
+		printStackTrace(ctx)
+	}
+}
+
+var stackName = "stack\x00"
+func printStackTrace(ctx *C.duk_context) {
+	// [ some-obj err ]
+	var name *C.char
+	getStrPtr(&stackName, &name)
+	C.duk_get_prop_string(ctx, -1, name) // [ some-obj err ret/undefined ]
+	stackTraceErr, _ := fromJsValue(ctx)
+	fmt.Fprintf(os.Stderr, "%v\n", stackTraceErr)
+	C.duk_pop_n(ctx, 1) // [ some-obj err ]
+	return
 }
 
 //export freeJsFunc

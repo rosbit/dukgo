@@ -110,6 +110,13 @@ func fromJsObj(ctx *C.duk_context) (goVal interface{}, err error) {
 	res := make(map[string]interface{})
 	for C.duk_next(ctx, -1, 1) != 0 {
 		// [ ... obj enum key value ]
+
+		// ignore key with undefined val
+		if C.duk_get_type(ctx, -1) == C.DUK_TYPE_UNDEFINED {
+			C.duk_pop_n(ctx, 2) // [ ... obj enum ]
+			continue
+		}
+
 		key := C.GoString(C.getCString(ctx, -2))
 		val, e := fromJsValue(ctx)
 		if e != nil {
