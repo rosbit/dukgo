@@ -52,6 +52,8 @@ func callJsFuncFromGo(ctx *C.duk_context, helper *elutils.EmbeddingFuncHelper, a
 	if rc := C.duk_pcall(ctx, C.int(argc)); rc != 0 { // [ some-obj retval/err ]
 		// [ some-obj err ]
 		printStackTrace(ctx)
+		C.duk_pop_n(ctx, 2) // [ ]
+		panic("failed to call call JS function")
 	}
 
 	// convert result to golang
@@ -70,8 +72,10 @@ func callFunc(ctx *C.duk_context, args ...interface{}) {
 	// [ obj function arg1 arg2 ... argN ]
 
 	if rc := C.duk_pcall(ctx, C.int(n)); rc != 0 { // [ obj retval/err ]
-		// [ some-obj err ]
+		// [ obj err ]
 		printStackTrace(ctx)
+		C.duk_pop_n(ctx, 2) // [ ]
+		panic("failed to call call JS function")
 	}
 }
 
